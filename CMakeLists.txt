@@ -33,6 +33,8 @@ option(CCCL_ENABLE_TESTING "Enable CUDA C++ Core Library tests." ON)
 include(CTest)
 enable_testing()
 
+include(cmake/CCCLHideThirdPartyOptions.cmake)
+
 if (CCCL_ENABLE_LIBCUDACXX)
   set(LIBCUDACXX_TOPLEVEL_PROJECT ON)
 endif()
