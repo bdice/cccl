@@ -1,6 +1,8 @@
 "use strict";
 
 (function () {
+  const maxBreadcrumbResults = 10;
+
   const decodeEntities = (value) =>
     String(value || "")
       .replace(/&lt;/g, "<")
@@ -179,27 +181,20 @@
         return result;
       }
 
+      const decorateTopResults = () => {
+        Array.from(output.querySelectorAll("li"))
+          .slice(0, maxBreadcrumbResults)
+          .forEach(addBreadcrumbTrail);
+      };
+
       if (Search.__ccclResultsObserver) {
         Search.__ccclResultsObserver.disconnect();
       }
 
-      for (const listItem of output.querySelectorAll("li")) {
-        addBreadcrumbTrail(listItem);
-      }
+      decorateTopResults();
 
       const observer = new MutationObserver((mutations) => {
-        for (const mutation of mutations) {
-          for (const node of mutation.addedNodes) {
-            if (node?.nodeType !== Node.ELEMENT_NODE) {
-              continue;
-            }
-            if (node.matches?.("li")) {
-              addBreadcrumbTrail(node);
-            } else {
-              node.querySelectorAll?.("li").forEach(addBreadcrumbTrail);
-            }
-          }
-        }
+        decorateTopResults();
       });
 
       observer.observe(output, { childList: true, subtree: true });
