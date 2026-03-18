@@ -7,7 +7,9 @@
       .replace(/&gt;/g, ">")
       .replace(/&amp;/g, "&")
       .replace(/&quot;/g, '"')
-      .replace(/&#39;/g, "'");
+      .replace(/&#39;|&apos;/g, "'")
+      .replace(/&nbsp;/g, " ")
+      .replace(/&hellip;/g, "...");
 
   const getDocLinkSuffix = () =>
     (typeof DOCUMENTATION_OPTIONS !== "undefined" &&
@@ -15,59 +17,6 @@
     ".html";
 
   const pageInfoCache = new Map();
-
-  const installBreadcrumbStyles = () => {
-    if (document.getElementById("cccl-search-breadcrumb-styles")) {
-      return;
-    }
-
-    const styleElement = document.createElement("style");
-    styleElement.id = "cccl-search-breadcrumb-styles";
-    styleElement.textContent = `
-      .cccl-search-breadcrumbs {
-        display: flex;
-        flex-wrap: wrap;
-        font-size: 0.72em;
-        line-height: normal;
-        list-style: none;
-        padding: 0;
-      }
-
-      .cccl-search-breadcrumbs .breadcrumb-item {
-        align-items: center;
-        display: flex;
-        font-weight: 700;
-        margin: 0;
-        padding: 0;
-        white-space: nowrap;
-      }
-
-      .cccl-search-breadcrumbs .breadcrumb-item a {
-        color: var(--pst-color-text-muted);
-        margin: 0.1875rem;
-        overflow-x: hidden;
-        text-decoration: none;
-        text-overflow: ellipsis;
-      }
-
-      .cccl-search-breadcrumbs .breadcrumb-item a:hover {
-        color: var(--pst-color-link-hover);
-        text-decoration: underline;
-        text-decoration-skip-ink: none;
-        text-decoration-thickness: max(3px, 0.1875rem, 0.12em);
-        text-underline-offset: 0.1578em;
-      }
-
-      .cccl-search-breadcrumbs .breadcrumb-item + .breadcrumb-item::before {
-        color: var(--pst-color-text-muted);
-        content: var(--pst-breadcrumb-divider);
-        font: var(--fa-font-solid);
-        font-size: 0.8rem;
-        padding: 0 0.5rem;
-      }
-    `;
-    document.head.appendChild(styleElement);
-  };
 
   const getDocTitle = (docName) => {
     if (
@@ -109,22 +58,6 @@
     return docName.replace(/^\/+/, "");
   };
 
-  const dedupeBreadcrumbs = (breadcrumbs) => {
-    const dedupedBreadcrumbs = [];
-    for (const breadcrumb of breadcrumbs) {
-      const previousBreadcrumb = dedupedBreadcrumbs[dedupedBreadcrumbs.length - 1];
-      if (
-        previousBreadcrumb &&
-        previousBreadcrumb.title === breadcrumb.title &&
-        previousBreadcrumb.href === breadcrumb.href
-      ) {
-        continue;
-      }
-      dedupedBreadcrumbs.push(breadcrumb);
-    }
-    return dedupedBreadcrumbs;
-  };
-
   const getPageInfo = async (docName) => {
     if (pageInfoCache.has(docName)) {
       return pageInfoCache.get(docName);
@@ -140,21 +73,19 @@
       const breadcrumbLinks = Array.from(
         parsed.querySelectorAll(".breadcrumb-item a.nav-link"),
       );
-      const breadcrumbs = dedupeBreadcrumbs(
-        breadcrumbLinks
-          .map((breadcrumbLink) => {
-            const rawHref = breadcrumbLink.getAttribute("href");
-            if (!rawHref) {
-              return null;
-            }
+      const breadcrumbs = breadcrumbLinks
+        .map((breadcrumbLink) => {
+          const rawHref = breadcrumbLink.getAttribute("href");
+          if (!rawHref) {
+            return null;
+          }
 
-            return {
-              href: new URL(rawHref, response.url).href,
-              title: breadcrumbLink.textContent?.trim() || null,
-            };
-          })
-          .filter((breadcrumb) => breadcrumb && breadcrumb.title),
-      );
+          return {
+            href: new URL(rawHref, response.url).href,
+            title: breadcrumbLink.textContent?.trim() || null,
+          };
+        })
+        .filter((breadcrumb) => breadcrumb && breadcrumb.title);
 
       return {
         pageTitle:
@@ -239,8 +170,6 @@
     ) {
       return;
     }
-
-    installBreadcrumbStyles();
 
     const originalPerformSearch = Search.performSearch;
     Search.performSearch = (...args) => {

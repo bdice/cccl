@@ -1,7 +1,12 @@
 {% extends "!nvidia_sphinx_theme/search.html" %}
 
-{% block scripts %}
-<script src="{{ pathto('_static/html_search_scorer.js', 1) }}"></script>
+{% block extrahead %}
 {{ super() }}
-<script src="{{ pathto('_static/html_search_postprocess.js', 1) }}"></script>
+<link rel="stylesheet" href="{{ pathto('_static/search_custom.css', 1) }}" />
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ pathto('_static/search_scorer.js', 1) }}"></script>
+{{ super() }}
+<script src="{{ pathto('_static/search_postprocess.js', 1) }}"></script>
 {% endblock %}

@@ -3,12 +3,12 @@
 const _normalizeSearchSymbol = (value) =>
   (value || "")
     .toLowerCase()
-    .replace(/&lt;|&gt;|&amp;/g, " ")
+    .replace(/&lt;|&gt;|&amp;|&quot;|&#39;|&apos;|&nbsp;|&hellip;/g, " ")
     .replace(/[^a-z0-9:]+/g, "");
 
 const _splitSymbolWords = (value) =>
   (value || "")
-    .replace(/&lt;|&gt;|&amp;/g, " ")
+    .replace(/&lt;|&gt;|&amp;|&quot;|&#39;|&apos;|&nbsp;|&hellip;/g, " ")
     .replace(/::/g, " ")
     .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
     .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
@@ -77,11 +77,6 @@ var Scorer = {
       /^[a-z0-9]+$/.test(lowerQuery);
 
     // Heuristic buckets
-    const looksLikeCppSymbol =
-      /::/.test(trimmedTitle) ||
-      /^(class|struct|function|typedef|alias|enum)\b/i.test(trimmedDescription) ||
-      /[#/]((class|struct|function|group)__|namespace)/i.test(trimmedAnchor);
-
     const looksLikeGenericConceptPage =
       /^(algorithms?|transformations?|utilities|overview|guide|examples?)$/i.test(
         trimmedTitle,
@@ -89,10 +84,6 @@ var Scorer = {
       /(api documentation|algorithms|overview|general concepts)/i.test(
         lowerDescription,
       );
-
-    const looksLikeApiPath =
-      /(api|reference|libcudacxx|thrust|cub)\//i.test(lowerFilename) ||
-      /(api|reference|libcudacxx|thrust|cub)\//i.test(lowerDocName);
 
     const looksLikeNamespaceQualified =
       /^[a-zA-Z_]\w*(::[a-zA-Z_]\w*)+/.test(trimmedTitle);
@@ -103,8 +94,6 @@ var Scorer = {
     const isClassishTitle =
       /::[A-Z]\w*$/.test(trimmedTitle); // e.g. cub::DeviceRadixSort
 
-    const isOverlyLongNarrativeTitle =
-      trimmedTitle.split(/\s+/).length >= 5 && !looksLikeNamespaceQualified;
     const isParameterLike =
       /(template parameter|function parameter)/i.test(trimmedDescription);
     const isMemberLike =
@@ -153,49 +142,24 @@ var Scorer = {
       /(Strategy|Policy|State|Status|Callback|Preference|Layout|Type|Op|Match|Functor|Tag|Traits|Descriptor|Counts)$/.test(
         leaf,
       );
-    const isCleanTopLevelQueryMatch =
-      isTopLevelSymbol &&
-      isCompactLeafMatch &&
-      !isEnumeratorLike &&
-      !isInternalHelperLike &&
-      !hasHelperSuffix;
-
     // Strong bias toward actual API symbols.
-    if (looksLikeCppSymbol) score += 40;
-    if (looksLikeNamespaceQualified) score += 30;
     if (isExactFunctionishTitle) score += 35;
     if (isClassishTitle) score += 20;
-    if (looksLikeApiPath) score += 10;
 
     // Small boost for anchored entries; these are often object targets.
     if (trimmedAnchor) score += 5;
 
     // Penalize taxonomy/concept pages that match lots of body text.
-    if (looksLikeGenericConceptPage) score -= 35;
-    if (isOverlyLongNarrativeTitle) score -= 10;
-
-    // Penalize pages that look like catch-all algorithm/category pages.
-    if (
-      /(algorithm|algorithms|transformation|transformations)/i.test(
-        lowerTitle,
-      ) &&
-      !looksLikeNamespaceQualified
-    ) {
-      score -= 15;
-    }
-
-    // Prefer symbol-heavy descriptions over prose-heavy ones.
-    if (/::/.test(trimmedDescription)) score += 8;
     if (
       lowerDescription.includes("thrust::") ||
-      lowerDescription.includes("cub::")
+      lowerDescription.includes("cub::") ||
+      lowerDescription.includes("cuda::")
     ) {
       score += 8;
     }
 
     // Query-aware ranking: prefer canonical symbol pages over nested members.
     if (normalizedQuery) {
-      if (normalizedTitle === normalizedQuery) score += 180;
       if (normalizedLeaf === normalizedLeafOnlyQuery) {
         score += isTopLevelSymbol ? 180 : 35;
       } else if (
@@ -206,39 +170,26 @@ var Scorer = {
       }
     }
 
-    if (isTopLevelSymbol) score += 30;
     if (isNestedSymbol) score -= 25;
     if (isParameterLike) score -= 80;
     if (isMemberLike) score -= 35;
     if (isConstructorLike) score -= 30;
     if (isCallableLike && isTopLevelSymbol) score += 20;
 
-    // Prefer libcudacxx/cuda iterator symbols over thrust equivalents on ties.
+    // Prefer libcudacxx/cuda symbols over thrust equivalents on ties.
     if (
       normalizedLeaf === normalizedLeafOnlyQuery &&
-      /^cuda::/.test(trimmedTitle) &&
-      /iterator/.test(normalizedLeaf)
+      /^cuda::/.test(trimmedTitle)
     ) {
       score += 12;
     }
 
     // For plain keyword queries, prefer pages that match in title/path metadata.
     if (simpleQuery) {
-      if (hasQueryInTitle) score += 90;
       if (hasQueryInFilename || hasQueryInDocName) score += 45;
-      if (!hasStrongMetadataMatch) score -= 120;
-      if (/^cuda\.coop\b/.test(lowerTitle)) score += 120;
-      if (
-        /python\/coop/.test(lowerFilename) ||
-        /python\/coop/.test(lowerDocName)
-      ) {
-        score += 80;
-      }
-      if (isEnumeratorLike) score -= 120;
       if (isInternalHelperLike) score -= 100;
       if (isPythonModuleLike) score -= 30;
       if (hasHelperSuffix) score -= 80;
-      if (isCleanTopLevelQueryMatch) score += 150;
       if (isTopLevelSymbol && isCallableLike && !hasHelperSuffix) score += 40;
       if (
         leafStartsWithQueryWord &&
@@ -268,14 +219,6 @@ var Scorer = {
       ) {
         score += 70 - 15 * (leafQueryRemainderWords.length - 1);
       }
-      if (
-        leafStartsWithQueryWord &&
-        leafQueryRemainderWords.length >= 3 &&
-        !isEnumeratorLike
-      ) {
-        score -= 25 * (leafQueryRemainderWords.length - 2);
-      }
-
       // If a nested member matches the query but its parent symbol also does,
       // prefer the parent page/class over the member overload.
       if (
