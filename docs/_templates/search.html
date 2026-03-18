@@ -1,0 +1,6 @@
+{% extends "!nvidia_sphinx_theme/search.html" %}
+
+{% block scripts %}
+<script src="{{ pathto('_static/html_search_scorer.js', 1) }}"></script>
+{{ super() }}
+{% endblock %}
