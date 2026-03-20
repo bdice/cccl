@@ -48,7 +48,6 @@ var Scorer = {
     const trimmedFilename = (filename || "").trim();
     const trimmedDocName = (docName || "").trim();
 
-    const lowerTitle = trimmedTitle.toLowerCase();
     const lowerDescription = trimmedDescription.toLowerCase();
     const lowerFilename = trimmedFilename.toLowerCase();
     const lowerDocName = trimmedDocName.toLowerCase();
@@ -64,7 +63,6 @@ var Scorer = {
     const parentTitle =
       titleParts.length > 1 ? titleParts.slice(0, -1).join("::") : "";
     const normalizedLeaf = _normalizeSearchSymbol(leaf);
-    const normalizedTitle = _normalizeSearchSymbol(trimmedTitle);
     const normalizedParent = _normalizeSearchSymbol(parentTitle);
     const normalizedLeafOnlyQuery = _normalizeSearchSymbol(
       query.includes("::") ? query.split("::").pop() : query,
@@ -75,15 +73,6 @@ var Scorer = {
       lowerQuery &&
       !/[.:/_]/.test(lowerQuery) &&
       /^[a-z0-9]+$/.test(lowerQuery);
-
-    // Heuristic buckets
-    const looksLikeGenericConceptPage =
-      /^(algorithms?|transformations?|utilities|overview|guide|examples?)$/i.test(
-        trimmedTitle,
-      ) ||
-      /(api documentation|algorithms|overview|general concepts)/i.test(
-        lowerDescription,
-      );
 
     const looksLikeNamespaceQualified =
       /^[a-zA-Z_]\w*(::[a-zA-Z_]\w*)+/.test(trimmedTitle);
@@ -105,12 +94,9 @@ var Scorer = {
     const isConstructorLike =
       isNestedSymbol &&
       _normalizeSearchSymbol(titleParts[symbolDepth - 2]) === normalizedLeaf;
-    const hasQueryInTitle = lowerQuery && lowerTitle.includes(lowerQuery);
     const hasQueryInFilename =
       lowerQuery && lowerFilename.includes(lowerQuery);
     const hasQueryInDocName = lowerQuery && lowerDocName.includes(lowerQuery);
-    const hasStrongMetadataMatch =
-      hasQueryInTitle || hasQueryInFilename || hasQueryInDocName;
     const isEnumeratorLike =
       /(C\+\+ enumerator\b)/i.test(trimmedDescription) || /^[A-Z0-9_]+$/.test(leaf);
     const isInternalHelperLike =
@@ -121,10 +107,6 @@ var Scorer = {
         trimmedTitle,
       );
     const isPythonModuleLike = /(Python module\b)/i.test(trimmedDescription);
-    const isCompactLeafMatch =
-      normalizedLeafOnlyQuery &&
-      normalizedLeaf.includes(normalizedLeafOnlyQuery) &&
-      normalizedLeaf.length <= normalizedLeafOnlyQuery.length + 18;
     const leafStartsWithQueryWord =
       queryWords.length === 1 && leafWords[0] === queryWords[0];
     const leafEndsWithQueryWord =
