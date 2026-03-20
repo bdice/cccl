@@ -24,6 +24,7 @@
 #if !_CCCL_COMPILER(NVRTC)
 
 #  include <cuda/__iterator/counting_iterator.h>
+#  include <cuda/__nvtx/nvtx.h>
 #  include <cuda/std/__algorithm/fill_n.h>
 #  include <cuda/std/__concepts/concept_macros.h>
 #  include <cuda/std/__execution/policy.h>
@@ -53,15 +54,17 @@ fill_n([[maybe_unused]] const _Policy& __policy, _InputIterator __first, _Size _
   static_assert(indirectly_writable<_InputIterator, const _Tp&>,
                 "cuda::std::fill_n requires InputIterator to be indirectly writable with const T&");
 
-  if (__count == 0)
-  {
-    return __first;
-  }
-
   [[maybe_unused]] auto __dispatch =
     ::cuda::std::execution::__pstl_select_dispatch<::cuda::std::execution::__pstl_algorithm::__generate_n, _Policy>();
   if constexpr (::cuda::std::execution::__pstl_can_dispatch<decltype(__dispatch)>)
   {
+    _CCCL_NVTX_RANGE_SCOPE("cuda::std::fill_n");
+
+    if (__count == 0)
+    {
+      return __first;
+    }
+
     return __dispatch(__policy, ::cuda::std::move(__first), __count, __fill_constant_value{__value});
   }
   else
