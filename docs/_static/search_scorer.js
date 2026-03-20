@@ -100,10 +100,10 @@ var Scorer = {
     const isEnumeratorLike =
       /(C\+\+ enumerator\b)/i.test(trimmedDescription) || /^[A-Z0-9_]+$/.test(leaf);
     const isInternalHelperLike =
-      /(policy|dispatch|state|status|callback|preference|layout|runningprefixop|emptycallback|algorithm|op|type)/i.test(
+      /(policy|dispatch|state|status|callback|preference|layout|runningprefixop|emptycallback|op)/i.test(
         trimmedTitle,
       ) ||
-      /(TileState|Policy|Dispatch|Callback|Preference|Layout|RunningPrefixOp|Status|Algorithm|EmptyCallback|Type)/.test(
+      /(TileState|Policy|Dispatch|Callback|Preference|Layout|RunningPrefixOp|Status|EmptyCallback)/.test(
         trimmedTitle,
       );
     const isPythonModuleLike = /(Python module\b)/i.test(trimmedDescription);
