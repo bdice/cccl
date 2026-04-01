@@ -78,6 +78,27 @@ struct sync_resource_a
   friend void get_property(const sync_resource_a&, cuda::mr::host_accessible) noexcept {}
 };
 
+struct sync_resource_base
+{
+  void* allocate_sync(size_t, size_t)
+  {
+    return nullptr;
+  }
+  void deallocate_sync(void*, size_t, size_t) noexcept {}
+  bool operator==(const sync_resource_base&) const noexcept
+  {
+    return true;
+  }
+  bool operator!=(const sync_resource_base&) const noexcept
+  {
+    return false;
+  }
+  friend void get_property(const sync_resource_base&, cuda::mr::host_accessible) noexcept {}
+};
+
+struct sync_resource_derived : sync_resource_base
+{};
+
 struct sync_resource_b
 {
   void* allocate_sync(size_t, size_t)
@@ -172,6 +193,20 @@ TEST_CASE("any_cast on synchronous_resource_ref", "[any_resource]")
   // nullptr input returns nullptr
   cuda::mr::synchronous_resource_ref<cuda::mr::host_accessible>* null_ref = nullptr;
   CHECK(cuda::mr::any_cast<sync_resource_a>(null_ref) == nullptr);
+}
+
+TEST_CASE("any_cast requires exact type match (no derived-to-base)", "[any_resource]")
+{
+  // any_cast performs an exact type match, like std::any_cast.
+  // Casting to a base class when a derived class is stored returns nullptr.
+  cuda::mr::any_synchronous_resource<cuda::mr::host_accessible> mr{sync_resource_derived{}};
+  CHECK(cuda::mr::any_cast<sync_resource_derived>(&mr) != nullptr);
+  CHECK(cuda::mr::any_cast<sync_resource_base>(&mr) == nullptr);
+
+  sync_resource_derived derived{};
+  cuda::mr::synchronous_resource_ref<cuda::mr::host_accessible> ref{derived};
+  CHECK(cuda::mr::any_cast<sync_resource_derived>(&ref) != nullptr);
+  CHECK(cuda::mr::any_cast<sync_resource_base>(&ref) == nullptr);
 }
 
 #endif // __CUDA_ARCH__
