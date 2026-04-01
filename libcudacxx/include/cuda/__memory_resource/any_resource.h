@@ -422,6 +422,100 @@ synchronous_resource_ref<_Properties...> __as_resource_ref(resource_ref<_Propert
   return __mr;
 }
 
+_CCCL_BEGIN_NAMESPACE_ABI_VER4_BUMP
+
+//! @brief Attempts to cast the type-erased resource stored in \p __res to \c _Resource.
+//!
+//! @tparam _Resource The resource type to cast to.
+//! @tparam _Properties The properties of the \c any_resource object.
+//! @param __res Pointer to the \c any_resource object to cast.
+//! @return A pointer to the contained \c _Resource object if the stored type is
+//! exactly \c _Resource, or \c nullptr otherwise.
+_CCCL_TEMPLATE(class _Resource, class... _Properties)
+_CCCL_REQUIRES(mr::resource_with<_Resource, _Properties...>)
+[[nodiscard]] _CCCL_HOST_API _Resource* any_cast(any_resource<_Properties...>* __res) noexcept
+{
+  return ::cuda::__any_cast<_Resource>(static_cast<::cuda::__basic_any<__iasync_resource<_Properties...>>*>(__res));
+}
+
+//! @overload
+_CCCL_TEMPLATE(class _Resource, class... _Properties)
+_CCCL_REQUIRES(mr::resource_with<_Resource, _Properties...>)
+[[nodiscard]] _CCCL_HOST_API const _Resource* any_cast(const any_resource<_Properties...>* __res) noexcept
+{
+  return ::cuda::__any_cast<_Resource>(
+    static_cast<const ::cuda::__basic_any<__iasync_resource<_Properties...>>*>(__res));
+}
+
+//! @brief Attempts to cast the type-erased resource stored in \p __res to \c _Resource.
+//!
+//! @tparam _Resource The resource type to cast to.
+//! @tparam _Properties The properties of the \c any_synchronous_resource object.
+//! @param __res Pointer to the \c any_synchronous_resource object to cast.
+//! @return A pointer to the contained \c _Resource object if the stored type is
+//! exactly \c _Resource, or \c nullptr otherwise.
+_CCCL_TEMPLATE(class _Resource, class... _Properties)
+_CCCL_REQUIRES(mr::synchronous_resource_with<_Resource, _Properties...>)
+[[nodiscard]] _CCCL_HOST_API _Resource* any_cast(any_synchronous_resource<_Properties...>* __res) noexcept
+{
+  return ::cuda::__any_cast<_Resource>(static_cast<::cuda::__basic_any<__iresource<_Properties...>>*>(__res));
+}
+
+//! @overload
+_CCCL_TEMPLATE(class _Resource, class... _Properties)
+_CCCL_REQUIRES(mr::synchronous_resource_with<_Resource, _Properties...>)
+[[nodiscard]] _CCCL_HOST_API const _Resource* any_cast(const any_synchronous_resource<_Properties...>* __res) noexcept
+{
+  return ::cuda::__any_cast<_Resource>(static_cast<const ::cuda::__basic_any<__iresource<_Properties...>>*>(__res));
+}
+
+//! @brief Attempts to cast the type-erased resource referenced by \p __res to \c _Resource.
+//!
+//! @tparam _Resource The resource type to cast to.
+//! @tparam _Properties The properties of the \c resource_ref object.
+//! @param __res Pointer to the \c resource_ref object to cast.
+//! @return A pointer to the referenced \c _Resource object if the referenced type is
+//! exactly \c _Resource, or \c nullptr otherwise.
+_CCCL_TEMPLATE(class _Resource, class... _Properties)
+_CCCL_REQUIRES(mr::resource_with<_Resource, _Properties...>)
+[[nodiscard]] _CCCL_HOST_API _Resource* any_cast(resource_ref<_Properties...>* __res) noexcept
+{
+  return ::cuda::__any_cast<_Resource>(static_cast<::cuda::__basic_any<__iasync_resource<_Properties...>&>*>(__res));
+}
+
+//! @overload
+_CCCL_TEMPLATE(class _Resource, class... _Properties)
+_CCCL_REQUIRES(mr::resource_with<_Resource, _Properties...>)
+[[nodiscard]] _CCCL_HOST_API const _Resource* any_cast(const resource_ref<_Properties...>* __res) noexcept
+{
+  return ::cuda::__any_cast<_Resource>(
+    static_cast<const ::cuda::__basic_any<__iasync_resource<_Properties...>&>*>(__res));
+}
+
+//! @brief Attempts to cast the type-erased resource referenced by \p __res to \c _Resource.
+//!
+//! @tparam _Resource The resource type to cast to.
+//! @tparam _Properties The properties of the \c synchronous_resource_ref object.
+//! @param __res Pointer to the \c synchronous_resource_ref object to cast.
+//! @return A pointer to the referenced \c _Resource object if the referenced type is
+//! exactly \c _Resource, or \c nullptr otherwise.
+_CCCL_TEMPLATE(class _Resource, class... _Properties)
+_CCCL_REQUIRES(mr::synchronous_resource_with<_Resource, _Properties...>)
+[[nodiscard]] _CCCL_HOST_API _Resource* any_cast(synchronous_resource_ref<_Properties...>* __res) noexcept
+{
+  return ::cuda::__any_cast<_Resource>(static_cast<::cuda::__basic_any<__iresource<_Properties...>&>*>(__res));
+}
+
+//! @overload
+_CCCL_TEMPLATE(class _Resource, class... _Properties)
+_CCCL_REQUIRES(mr::synchronous_resource_with<_Resource, _Properties...>)
+[[nodiscard]] _CCCL_HOST_API const _Resource* any_cast(const synchronous_resource_ref<_Properties...>* __res) noexcept
+{
+  return ::cuda::__any_cast<_Resource>(static_cast<const ::cuda::__basic_any<__iresource<_Properties...>&>*>(__res));
+}
+
+_CCCL_END_NAMESPACE_ABI_VER4_BUMP
+
 #  else // ^^^ !_CCCL_DOXYGEN_INVOKED ^^^ / vvv _CCCL_DOXYGEN_INVOKED vvv
 
 enum class _ResourceKind
@@ -892,6 +986,66 @@ using synchronous_resource_ref = basic_resource_ref<_ResourceKind::_Synchronous,
 //! the `resource_ref` needs to satisfy
 template <class... _Properties>
 using resource_ref = basic_resource_ref<_ResourceKind::_Asynchronous, _Properties...>;
+
+//! @rst
+//! .. _libcudacxx-memory-resource-any-cast:
+//!
+//! ``any_cast`` for type-erased memory resources
+//! -----------------------------------------------
+//!
+//! ``any_cast`` attempts to obtain a pointer to the concrete resource type stored
+//! in a type-erased memory resource wrapper. It is analogous to
+//! ``std::any_cast`` for ``std::any``.
+//!
+//! When called with a pointer to an ``any_resource``, ``any_synchronous_resource``,
+//! ``resource_ref``, or ``synchronous_resource_ref``, ``any_cast`` returns a pointer
+//! to the contained or referenced object if its type matches ``_Resource`` exactly,
+//! or ``nullptr`` otherwise.
+//!
+//! @endrst
+//!
+//! @tparam _Resource The concrete resource type to cast to.
+//! @tparam _Properties The properties of the type-erased resource wrapper.
+//! @param __res Pointer to the type-erased resource wrapper.
+//! @return A pointer to the contained or referenced \c _Resource if the stored type
+//! is exactly \c _Resource, or \c nullptr otherwise. Also returns \c nullptr if
+//! \p __res is \c nullptr or empty.
+
+//! @brief Attempts to obtain a pointer to the resource of type \c _Resource
+//! stored in an \c any_resource.
+template <class _Resource, class... _Properties>
+_Resource* any_cast(any_resource<_Properties...>* __res) noexcept;
+
+//! @overload
+template <class _Resource, class... _Properties>
+const _Resource* any_cast(const any_resource<_Properties...>* __res) noexcept;
+
+//! @brief Attempts to obtain a pointer to the resource of type \c _Resource
+//! stored in an \c any_synchronous_resource.
+template <class _Resource, class... _Properties>
+_Resource* any_cast(any_synchronous_resource<_Properties...>* __res) noexcept;
+
+//! @overload
+template <class _Resource, class... _Properties>
+const _Resource* any_cast(const any_synchronous_resource<_Properties...>* __res) noexcept;
+
+//! @brief Attempts to obtain a pointer to the resource of type \c _Resource
+//! referenced by a \c resource_ref.
+template <class _Resource, class... _Properties>
+_Resource* any_cast(resource_ref<_Properties...>* __ref) noexcept;
+
+//! @overload
+template <class _Resource, class... _Properties>
+const _Resource* any_cast(const resource_ref<_Properties...>* __ref) noexcept;
+
+//! @brief Attempts to obtain a pointer to the resource of type \c _Resource
+//! referenced by a \c synchronous_resource_ref.
+template <class _Resource, class... _Properties>
+_Resource* any_cast(synchronous_resource_ref<_Properties...>* __ref) noexcept;
+
+//! @overload
+template <class _Resource, class... _Properties>
+const _Resource* any_cast(const synchronous_resource_ref<_Properties...>* __ref) noexcept;
 
 #  endif // _CCCL_DOXYGEN_INVOKED
 
