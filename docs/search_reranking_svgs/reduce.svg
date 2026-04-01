@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="358" viewBox="0 0 600 358" role="img" aria-label="reduce reranking">
+
+    <defs>
+      <marker id="arrowhead" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+        <path d="M0,0 L8,4 L0,8 Z" fill="#6b7280" />
+      </marker>
+    </defs>
+  <rect width="600" height="358" fill="#ffffff" />
+  <text x="24" y="26" font-family="system-ui, sans-serif" font-size="20" font-weight="700" fill="#111827">reduce</text>
+  <text x="24" y="44" font-family="system-ui, sans-serif" font-size="13" font-weight="600" fill="#374151">Before</text>
+  <text x="320" y="44" font-family="system-ui, sans-serif" font-size="13" font-weight="600" fill="#374151">After</text>
+
+
+    <rect x="24" y="56" width="141.1" height="20" rx="6" fill="#f8fafc" stroke="#cbd5e1" />
+    <text x="32" y="70" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#0f172a">1. cp.reduce.async.bulk</text>
+
+    <rect x="24" y="84" width="250" height="20" rx="6" fill="#f8fafc" stroke="#cbd5e1" />
+    <text x="32" y="98" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#0f172a">2. cp.reduce.async.bulk.global.shared::cta.b…</text>
+
+    <rect x="24" y="112" width="250" height="20" rx="6" fill="#f8fafc" stroke="#cbd5e1" />
+    <text x="32" y="126" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#0f172a">3. cp.reduce.async.bulk.global.shared::cta.b…</text>
+
+    <rect x="24" y="140" width="250" height="20" rx="6" fill="#f8fafc" stroke="#cbd5e1" />
+    <text x="32" y="154" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#0f172a">4. cp.reduce.async.bulk.shared::cluster.shar…</text>
+
+    <rect x="24" y="168" width="181" height="20" rx="6" fill="#f8fafc" stroke="#cbd5e1" />
+    <text x="32" y="182" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#0f172a">5. cp.reduce.async.bulk.tensor</text>
+
+    <rect x="24" y="196" width="250" height="20" rx="6" fill="#f8fafc" stroke="#cbd5e1" />
+    <text x="32" y="210" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#0f172a">6. cp.reduce.async.bulk.tensor.1d.global.sha…</text>
+
+    <rect x="24" y="224" width="130" height="20" rx="6" fill="#f8fafc" stroke="#cbd5e1" />
+    <text x="32" y="238" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#0f172a">7. CUDASTF</text>
+
+    <rect x="24" y="252" width="181" height="20" rx="6" fill="#f8fafc" stroke="#cbd5e1" />
+    <text x="32" y="266" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#0f172a">8. cub::AgentReduceByKeyPolicy</text>
+
+    <rect x="24" y="280" width="250" height="20" rx="6" fill="#f8fafc" stroke="#cbd5e1" />
+    <text x="32" y="294" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#0f172a">9. cub::AgentReduceByKeyPolicy::BLOCK_THREADS</text>
+
+    <rect x="24" y="308" width="250" height="20" rx="6" fill="#f8fafc" stroke="#cbd5e1" />
+    <text x="32" y="322" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#0f172a">10. cub::AgentReduceByKeyPolicy::BlockThreads</text>
+
+    <rect x="320" y="56" width="130" height="20" rx="6" fill="#f8fafc" stroke="#cbd5e1" />
+    <text x="328" y="70" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#0f172a">1. thrust::reduce</text>
+
+    <rect x="320" y="84" width="135.4" height="20" rx="6" fill="#f8fafc" stroke="#cbd5e1" />
+    <text x="328" y="98" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#0f172a">2. thrust::reduce_into</text>
+
+    <rect x="320" y="112" width="146.8" height="20" rx="6" fill="#f8fafc" stroke="#cbd5e1" />
+    <text x="328" y="126" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#0f172a">3. thrust::reduce_by_key</text>
+
+    <rect x="320" y="140" width="130" height="20" rx="6" fill="#f8fafc" stroke="#cbd5e1" />
+    <text x="328" y="154" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#0f172a">4. cub::BlockReduce</text>
+
+    <rect x="320" y="168" width="130" height="20" rx="6" fill="#f8fafc" stroke="#cbd5e1" />
+    <text x="328" y="182" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#0f172a">5. cub::DeviceReduce</text>
+
+    <rect x="320" y="196" width="175.3" height="20" rx="6" fill="#f8fafc" stroke="#cbd5e1" />
+    <text x="328" y="210" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#0f172a">6. cub::DeviceSegmentedReduce</text>
+
+    <rect x="320" y="224" width="130" height="20" rx="6" fill="#f8fafc" stroke="#cbd5e1" />
+    <text x="328" y="238" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#0f172a">7. cub::WarpReduce</text>
+
+    <rect x="320" y="252" width="163.9" height="20" rx="6" fill="#f8fafc" stroke="#cbd5e1" />
+    <text x="328" y="266" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#0f172a">8. cub::DispatchReduceByKey</text>
+
+    <rect x="320" y="280" width="163.9" height="20" rx="6" fill="#f8fafc" stroke="#cbd5e1" />
+    <text x="328" y="294" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#0f172a">9. cub::BLOCK_REDUCE_RAKING</text>
+
+    <rect x="320" y="308" width="250" height="20" rx="6" fill="#f8fafc" stroke="#cbd5e1" />
+    <text x="328" y="322" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#0f172a">10. cub::BLOCK_REDUCE_RAKING_COMMUTATIVE_ONLY</text>
+</svg>

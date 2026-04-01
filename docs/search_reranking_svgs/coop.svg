@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="358" viewBox="0 0 600 358" role="img" aria-label="coop reranking">
+
+    <defs>
+      <marker id="arrowhead" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+        <path d="M0,0 L8,4 L0,8 Z" fill="#6b7280" />
+      </marker>
+    </defs>
+  <rect width="600" height="358" fill="#ffffff" />
+  <text x="24" y="26" font-family="system-ui, sans-serif" font-size="20" font-weight="700" fill="#111827">coop</text>
+  <text x="24" y="44" font-family="system-ui, sans-serif" font-size="13" font-weight="600" fill="#374151">Before</text>
+  <text x="320" y="44" font-family="system-ui, sans-serif" font-size="13" font-weight="600" fill="#374151">After</text>
+  <path d="M 192.20000000000002 66 C 214.20000000000002 66, 288 234, 310 234" fill="none" stroke="#b45309" stroke-width="1.4" marker-end="url(#arrowhead)" />
+<path d="M 284 178 C 306 178, 288 206, 310 206" fill="none" stroke="#b45309" stroke-width="1.4" marker-end="url(#arrowhead)" />
+<path d="M 164 206 C 186 206, 288 94, 310 94" fill="none" stroke="#1d4ed8" stroke-width="1.4" marker-end="url(#arrowhead)" />
+<path d="M 180.8 234 C 202.8 234, 288 122, 310 122" fill="none" stroke="#1d4ed8" stroke-width="1.4" marker-end="url(#arrowhead)" />
+<path d="M 169.4 290 C 191.4 290, 288 66, 310 66" fill="none" stroke="#1d4ed8" stroke-width="1.4" marker-end="url(#arrowhead)" />
+
+    <rect x="24" y="56" width="158.20000000000002" height="20" rx="6" fill="#f8fafc" stroke="#cbd5e1" />
+    <text x="32" y="70" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#0f172a">1. cuda.coop API Reference</text>
+
+    <rect x="24" y="84" width="130" height="20" rx="6" fill="#f8fafc" stroke="#cbd5e1" />
+    <text x="32" y="98" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#0f172a">2. cuda.coop.block</text>
+
+    <rect x="24" y="112" width="130" height="20" rx="6" fill="#f8fafc" stroke="#cbd5e1" />
+    <text x="32" y="126" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#0f172a">3. cuda.coop.warp</text>
+
+    <rect x="24" y="140" width="215.20000000000002" height="20" rx="6" fill="#f8fafc" stroke="#cbd5e1" />
+    <text x="32" y="154" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#0f172a">4. cuda.coop: Cooperative Algorithms</text>
+
+    <rect x="24" y="168" width="250" height="20" rx="6" fill="#f8fafc" stroke="#cbd5e1" />
+    <text x="32" y="182" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#0f172a">5. cuda::experimental::stf::interpreted_exec…</text>
+
+    <rect x="24" y="196" width="130" height="20" rx="6" fill="#f8fafc" stroke="#cbd5e1" />
+    <text x="32" y="210" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#0f172a">6. API Reference</text>
+
+    <rect x="24" y="224" width="146.8" height="20" rx="6" fill="#f8fafc" stroke="#cbd5e1" />
+    <text x="32" y="238" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#0f172a">7. CCCL Python Libraries</text>
+
+    <rect x="24" y="252" width="152.5" height="20" rx="6" fill="#f8fafc" stroke="#cbd5e1" />
+    <text x="32" y="266" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#0f172a">8. CUB Developer Overview</text>
+
+    <rect x="24" y="280" width="135.4" height="20" rx="6" fill="#f8fafc" stroke="#cbd5e1" />
+    <text x="32" y="294" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#0f172a">9. cub::BlockRadixSort</text>
+
+    <rect x="24" y="308" width="220.9" height="20" rx="6" fill="#f8fafc" stroke="#cbd5e1" />
+    <text x="32" y="322" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#0f172a">10. cuda.coop.block.BlockExchangeType</text>
+
+    <rect x="320" y="56" width="135.4" height="20" rx="6" fill="#f8fafc" stroke="#cbd5e1" />
+    <text x="328" y="70" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#0f172a">1. cub::BlockRadixSort</text>
+
+    <rect x="320" y="84" width="130" height="20" rx="6" fill="#f8fafc" stroke="#cbd5e1" />
+    <text x="328" y="98" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#0f172a">2. API Reference</text>
+
+    <rect x="320" y="112" width="146.8" height="20" rx="6" fill="#f8fafc" stroke="#cbd5e1" />
+    <text x="328" y="126" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#0f172a">3. CCCL Python Libraries</text>
+
+    <rect x="320" y="140" width="130" height="20" rx="6" fill="#f8fafc" stroke="#cbd5e1" />
+    <text x="328" y="154" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#0f172a">4. Resources</text>
+
+    <rect x="320" y="168" width="152.5" height="20" rx="6" fill="#f8fafc" stroke="#cbd5e1" />
+    <text x="328" y="182" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#0f172a">5. Setup and Installation</text>
+
+    <rect x="320" y="196" width="250" height="20" rx="6" fill="#f8fafc" stroke="#cbd5e1" />
+    <text x="328" y="210" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#0f172a">6. cuda::experimental::stf::interpreted_exec…</text>
+
+    <rect x="320" y="224" width="158.20000000000002" height="20" rx="6" fill="#f8fafc" stroke="#cbd5e1" />
+    <text x="328" y="238" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#0f172a">7. cuda.coop API Reference</text>
+
+    <rect x="320" y="252" width="250" height="20" rx="6" fill="#f8fafc" stroke="#cbd5e1" />
+    <text x="328" y="266" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#0f172a">8. cuda.coop.block.BlockExchangeType.Striped…</text>
+
+    <rect x="320" y="280" width="192.4" height="20" rx="6" fill="#f8fafc" stroke="#cbd5e1" />
+    <text x="328" y="294" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#0f172a">9. cuda.coop.block.make_exchange</text>
+
+    <rect x="320" y="308" width="232.3" height="20" rx="6" fill="#f8fafc" stroke="#cbd5e1" />
+    <text x="328" y="322" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#0f172a">10. cuda.coop.block.make_exclusive_scan</text>
+</svg>
