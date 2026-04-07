@@ -348,4 +348,61 @@ TEST_CASE("regression test for NVIDIA/cccl#8037", "[container][resource]")
 {
   STATIC_REQUIRE(cuda::std::move_constructible<my_resource_wrapper>);
 }
+
+// Minimal proxy that wraps a value and provides operator T&(), mimicking
+// Cython's __Pyx_FakeReference<T> which wraps intermediate expression results.
+template <typename T>
+struct value_proxy
+{
+  T value;
+
+  template <typename... Args>
+  explicit value_proxy(Args&&... args)
+      : value(std::forward<Args>(args)...)
+  {}
+
+  operator T&()
+  {
+    return value;
+  }
+};
+
+// See https://github.com/NVIDIA/cccl/issues/8316
+TEST_CASE("any_resource from proxy-wrapped resource_ref", "[container][resource]")
+{
+  host_device_resource mr;
+  cuda::mr::resource_ref<cuda::mr::host_accessible> ref{mr};
+
+  SECTION("direct construction from resource_ref")
+  {
+    cuda::mr::any_resource<cuda::mr::host_accessible> any{ref};
+    CHECK(any == ref);
+  }
+
+  SECTION("construction from proxy-wrapped resource_ref")
+  {
+    value_proxy<cuda::mr::resource_ref<cuda::mr::host_accessible>> proxy{mr};
+    cuda::mr::any_resource<cuda::mr::host_accessible> any{proxy};
+    CHECK(any == ref);
+  }
+}
+
+TEST_CASE("any_synchronous_resource from proxy-wrapped synchronous_resource_ref", "[container][resource]")
+{
+  host_device_resource mr;
+  cuda::mr::synchronous_resource_ref<cuda::mr::host_accessible> ref{mr};
+
+  SECTION("direct construction from synchronous_resource_ref")
+  {
+    cuda::mr::any_synchronous_resource<cuda::mr::host_accessible> any{ref};
+    CHECK(any == ref);
+  }
+
+  SECTION("construction from proxy-wrapped synchronous_resource_ref")
+  {
+    value_proxy<cuda::mr::synchronous_resource_ref<cuda::mr::host_accessible>> proxy{mr};
+    cuda::mr::any_synchronous_resource<cuda::mr::host_accessible> any{proxy};
+    CHECK(any == ref);
+  }
+}
 #endif // __CUDA_ARCH__
