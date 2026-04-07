@@ -161,7 +161,7 @@ public:
   //! @post `has_value() == __other.has_value()`.
   _CCCL_TEMPLATE(class _OtherInterface)
   _CCCL_REQUIRES(
-    (!::cuda::std::same_as<_OtherInterface, _Interface>) _CCCL_AND(!::cuda::std::same_as<_OtherInterface, _Interface&>)
+    (!::cuda::std::same_as<_OtherInterface&, _Interface&>)
       _CCCL_AND __any_convertible_to<__basic_any<_OtherInterface> const&, __basic_any>)
   _CCCL_API __basic_any(__basic_any<_OtherInterface> const& __other)
   {
