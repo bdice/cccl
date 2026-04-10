@@ -376,15 +376,28 @@ TEST_CASE("any_resource from proxy-wrapped resource_ref", "[container][resource]
   SECTION("direct construction from resource_ref")
   {
     cuda::mr::any_resource<cuda::mr::host_accessible> any{ref};
-    CHECK(any == ref);
+    // Extra parens prevent Catch2's expression decomposition, which triggers
+    // an nvcc bug with auto NTTP deduction in __satisfies during ADL.
+    CHECK((any == ref));
   }
 
-  SECTION("construction from proxy-wrapped resource_ref")
+#  if !_CCCL_CUDA_COMPILER(NVCC, <, 12, 9)
+  // nvcc before CTK 12.9 has a bug where auto NTTP deduction failures in
+  // __satisfies are hard errors instead of SFINAE during overload resolution.
+  SECTION("construction from lvalue proxy-wrapped resource_ref")
   {
     value_proxy<cuda::mr::resource_ref<cuda::mr::host_accessible>> proxy{mr};
     cuda::mr::any_resource<cuda::mr::host_accessible> any{proxy};
-    CHECK(any == ref);
+    CHECK((any == ref));
   }
+
+  SECTION("construction from rvalue proxy-wrapped resource_ref")
+  {
+    cuda::mr::any_resource<cuda::mr::host_accessible> any{
+      value_proxy<cuda::mr::resource_ref<cuda::mr::host_accessible>>{mr}};
+    CHECK((any == ref));
+  }
+#  endif // !_CCCL_CUDA_COMPILER(NVCC, <, 12, 9)
 }
 
 TEST_CASE("any_synchronous_resource from proxy-wrapped synchronous_resource_ref", "[container][resource]")
@@ -395,14 +408,23 @@ TEST_CASE("any_synchronous_resource from proxy-wrapped synchronous_resource_ref"
   SECTION("direct construction from synchronous_resource_ref")
   {
     cuda::mr::any_synchronous_resource<cuda::mr::host_accessible> any{ref};
-    CHECK(any == ref);
+    CHECK((any == ref));
   }
 
-  SECTION("construction from proxy-wrapped synchronous_resource_ref")
+#  if !_CCCL_CUDA_COMPILER(NVCC, <, 12, 9)
+  SECTION("construction from lvalue proxy-wrapped synchronous_resource_ref")
   {
     value_proxy<cuda::mr::synchronous_resource_ref<cuda::mr::host_accessible>> proxy{mr};
     cuda::mr::any_synchronous_resource<cuda::mr::host_accessible> any{proxy};
-    CHECK(any == ref);
+    CHECK((any == ref));
   }
+
+  SECTION("construction from rvalue proxy-wrapped synchronous_resource_ref")
+  {
+    cuda::mr::any_synchronous_resource<cuda::mr::host_accessible> any{
+      value_proxy<cuda::mr::synchronous_resource_ref<cuda::mr::host_accessible>>{mr}};
+    CHECK((any == ref));
+  }
+#  endif // !_CCCL_CUDA_COMPILER(NVCC, <, 12, 9)
 }
 #endif // __CUDA_ARCH__
