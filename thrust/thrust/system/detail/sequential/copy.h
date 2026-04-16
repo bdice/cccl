@@ -17,12 +17,13 @@
 #  pragma system_header
 #endif // no system header
 #include <thrust/detail/type_traits.h>
-#include <thrust/detail/type_traits/pointer_traits.h>
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/system/detail/sequential/execution_policy.h>
 #include <thrust/system/detail/sequential/general_copy.h>
 #include <thrust/system/detail/sequential/trivial_copy.h>
 #include <thrust/type_traits/is_trivially_relocatable.h>
+
+#include <cuda/std/__memory/pointer_traits.h>
 
 THRUST_NAMESPACE_BEGIN
 namespace system::detail::sequential
@@ -31,9 +32,9 @@ namespace copy_detail
 {
 // returns the raw pointer associated with a Pointer-like thing
 template <typename Pointer>
-_CCCL_HOST_DEVICE typename thrust::detail::pointer_traits<Pointer>::raw_pointer get(Pointer ptr)
+_CCCL_HOST_DEVICE auto get(Pointer ptr) -> decltype(::cuda::std::to_address(ptr))
 {
-  return thrust::detail::pointer_traits<Pointer>::get(ptr);
+  return ::cuda::std::to_address(ptr);
 }
 
 _CCCL_EXEC_CHECK_DISABLE

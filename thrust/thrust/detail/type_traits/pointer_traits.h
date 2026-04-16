@@ -12,20 +12,15 @@
 #elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
 #  pragma system_header
 #endif // no system header
-#include <thrust/detail/type_traits.h>
-#include <thrust/detail/type_traits/has_nested_type.h>
 #include <thrust/detail/type_traits/is_thrust_pointer.h>
 #include <thrust/iterator/iterator_traits.h>
 
+#include <cuda/std/__memory/pointer_traits.h>
 #include <cuda/std/__type_traits/add_lvalue_reference.h>
-#include <cuda/std/__type_traits/conjunction.h>
 #include <cuda/std/__type_traits/enable_if.h>
 #include <cuda/std/__type_traits/is_comparable.h>
 #include <cuda/std/__type_traits/is_convertible.h>
-#include <cuda/std/__type_traits/is_same.h>
 #include <cuda/std/__type_traits/is_void.h>
-#include <cuda/std/__type_traits/type_identity.h>
-#include <cuda/std/cstddef>
 
 THRUST_NAMESPACE_BEGIN
 namespace detail
@@ -100,151 +95,6 @@ struct rebind_pointer<Ptr<OldT, Tag, ::cuda::std::add_lvalue_reference_t<OldT>, 
 {
   //  static_assert(::cuda::std::is_same<OldT, Tag>::value, "3");
   using type = Ptr<T, Tag, ::cuda::std::add_lvalue_reference_t<T>, DerivedPtr<T, DerivedPtrTail...>>;
-};
-
-namespace pointer_traits_detail
-{
-template <typename Void>
-struct capture_address
-{
-  template <typename T>
-  _CCCL_HOST_DEVICE capture_address(T& r)
-      : m_addr(&r)
-  {}
-
-  inline _CCCL_HOST_DEVICE Void* operator&() const
-  {
-    return m_addr;
-  }
-
-  Void* m_addr;
-};
-
-// metafunction to compute the type of pointer_to's parameter below
-template <typename T>
-struct pointer_to_param
-    : thrust::detail::eval_if<::cuda::std::is_void_v<T>,
-                              ::cuda::std::type_identity<capture_address<T>>,
-                              ::cuda::std::add_lvalue_reference<T>>
-{};
-} // namespace pointer_traits_detail
-
-template <typename Ptr>
-struct pointer_traits
-{
-  using pointer         = Ptr;
-  using reference       = typename Ptr::reference;
-  using element_type    = typename ::cuda::std::pointer_traits<pointer>::element_type;
-  using difference_type = typename ::cuda::std::pointer_traits<pointer>::difference_type;
-
-  template <typename U>
-  struct rebind
-  {
-    using other = typename rebind_pointer<Ptr, U>::type;
-  };
-
-  _CCCL_HOST_DEVICE inline static pointer
-  pointer_to(typename pointer_traits_detail::pointer_to_param<element_type>::type r)
-  {
-    // XXX this is supposed to be pointer::pointer_to(&r); (i.e., call a static member function of pointer called
-    // pointer_to)
-    //     assume that pointer has a constructor from raw pointer instead
-
-    return pointer(&r);
-  }
-
-  // thrust additions follow
-  using raw_pointer = typename pointer_raw_pointer<Ptr>::type;
-
-  _CCCL_HOST_DEVICE inline static raw_pointer get(pointer ptr)
-  {
-    return ptr.get();
-  }
-};
-
-template <typename T>
-struct pointer_traits<T*>
-{
-  using pointer         = T*;
-  using reference       = T&;
-  using element_type    = T;
-  using difference_type = typename ::cuda::std::pointer_traits<pointer>::difference_type;
-
-  template <typename U>
-  struct rebind
-  {
-    using other = U*;
-  };
-
-  _CCCL_HOST_DEVICE inline static pointer
-  pointer_to(typename pointer_traits_detail::pointer_to_param<element_type>::type r)
-  {
-    return &r;
-  }
-
-  // thrust additions follow
-  using raw_pointer = typename pointer_raw_pointer<T*>::type;
-
-  _CCCL_HOST_DEVICE inline static raw_pointer get(pointer ptr)
-  {
-    return ptr;
-  }
-};
-
-template <>
-struct pointer_traits<void*>
-{
-  using pointer         = void*;
-  using reference       = void;
-  using element_type    = void;
-  using difference_type = typename ::cuda::std::pointer_traits<pointer>::difference_type;
-
-  template <typename U>
-  struct rebind
-  {
-    using other = U*;
-  };
-
-  _CCCL_HOST_DEVICE inline static pointer pointer_to(pointer_traits_detail::pointer_to_param<element_type>::type r)
-  {
-    return &r;
-  }
-
-  // thrust additions follow
-  using raw_pointer = pointer_raw_pointer<void*>::type;
-
-  _CCCL_HOST_DEVICE inline static raw_pointer get(pointer ptr)
-  {
-    return ptr;
-  }
-};
-
-template <>
-struct pointer_traits<const void*>
-{
-  using pointer         = const void*;
-  using reference       = const void;
-  using element_type    = const void;
-  using difference_type = typename ::cuda::std::pointer_traits<pointer>::difference_type;
-
-  template <typename U>
-  struct rebind
-  {
-    using other = U*;
-  };
-
-  _CCCL_HOST_DEVICE inline static pointer pointer_to(pointer_traits_detail::pointer_to_param<element_type>::type r)
-  {
-    return &r;
-  }
-
-  // thrust additions follow
-  using raw_pointer = pointer_raw_pointer<const void*>::type;
-
-  _CCCL_HOST_DEVICE inline static raw_pointer get(pointer ptr)
-  {
-    return ptr;
-  }
 };
 
 template <typename FromPtr, typename ToPtr>

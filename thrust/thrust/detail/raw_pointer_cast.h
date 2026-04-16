@@ -13,16 +13,16 @@
 #  pragma system_header
 #endif // no system header
 
-#include <thrust/detail/type_traits/pointer_traits.h>
+#include <thrust/detail/type_traits/is_thrust_pointer.h>
 
 #include <cuda/std/__memory/pointer_traits.h>
 
 THRUST_NAMESPACE_BEGIN
 
 template <typename Pointer>
-_CCCL_HOST_DEVICE typename thrust::detail::pointer_traits<Pointer>::raw_pointer raw_pointer_cast(Pointer ptr)
+_CCCL_HOST_DEVICE typename thrust::detail::pointer_raw_pointer<Pointer>::type raw_pointer_cast(Pointer ptr)
 {
-  return thrust::detail::pointer_traits<Pointer>::get(ptr);
+  return ::cuda::std::to_address(ptr);
 }
 
 template <typename ToPointer, typename FromPointer>
