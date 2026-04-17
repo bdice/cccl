@@ -20,9 +20,11 @@
 #include <cuda/std/memory>
 
 #include <format>
+#include <mutex>
 #include <sstream>
 #include <string>
 #include <type_traits>
+#include <unordered_map>
 #include <vector>
 
 #include <stdio.h> // printf
@@ -107,6 +109,47 @@ struct cache
 {
   cuda::std::optional<cub::detail::transform::cuda_expected<cub::detail::transform::async_config>> async_config{};
   cuda::std::optional<cub::detail::transform::cuda_expected<cub::detail::transform::prefetch_config>> prefetch_config{};
+};
+
+struct cubin_cache_entry
+{
+  std::vector<char> cubin;
+};
+
+struct cubin_cache
+{
+  std::mutex mutex;
+  std::unordered_map<std::string, cubin_cache_entry> entries;
+
+  static cubin_cache& instance()
+  {
+    static cubin_cache cache;
+    return cache;
+  }
+
+  static std::string make_key(
+    const char** input_list,
+    const size_t* input_sizes,
+    size_t num_inputs,
+    const char* kernel_name,
+    int cc_major,
+    int cc_minor)
+  {
+    std::string key;
+    key += std::format("sm_{}{}/", cc_major, cc_minor);
+    key += kernel_name;
+    key += '/';
+    for (size_t i = 0; i < num_inputs; ++i)
+    {
+      if (input_list[i] != nullptr && input_sizes[i] > 0)
+      {
+        key += std::to_string(std::hash<std::string_view>{}(
+          std::string_view(input_list[i], input_sizes[i])));
+        key += ',';
+      }
+    }
+    return key;
+  }
 };
 
 template <int NumInputs>
@@ -634,134 +677,147 @@ CUresult cccl_device_transform_link_ltoir(
   int cc_minor)
 try
 {
+  (void) input_type; // Always use NVJITLINK_INPUT_ANY; kept for API compatibility.
+
   if (build_ptr == nullptr || input_list == nullptr || input_sizes == nullptr || num_inputs == 0
       || kernel_lowered_name == nullptr || input_value_sizes == nullptr)
   {
     return CUDA_ERROR_INVALID_VALUE;
   }
 
-  const std::string arch = std::format("-arch=sm_{0}{1}", cc_major, cc_minor);
-  constexpr size_t num_lto_args   = 2;
-  const char* lopts[num_lto_args] = {"-lto", arch.c_str()};
+  // Check the cubin cache before invoking nvJitLink.
+  auto& cc = transform::cubin_cache::instance();
+  std::string cache_key =
+    transform::cubin_cache::make_key(input_list, input_sizes, num_inputs, kernel_lowered_name, cc_major, cc_minor);
 
-  nvJitLinkHandle jit_handle{};
-  check(nvJitLinkCreate(&jit_handle, num_lto_args, lopts));
+  std::unique_ptr<char[]> cubin;
+  size_t cubin_size{};
 
-  // RAII guard to ensure nvJitLinkDestroy is called on all paths.
-  auto jit_handle_cleanup = [&jit_handle]() {
-    if (jit_handle)
-    {
-      nvJitLinkDestroy(&jit_handle);
-      jit_handle = nullptr;
-    }
-  };
-
-  nvJitLinkInputType jitlink_input_type;
-  switch (input_type)
   {
-    case CCCL_LTOIR_INPUT_LTOIR:
-      jitlink_input_type = NVJITLINK_INPUT_LTOIR;
-      break;
-    case CCCL_LTOIR_INPUT_OBJECT:
-      jitlink_input_type = NVJITLINK_INPUT_OBJECT;
-      break;
-    case CCCL_LTOIR_INPUT_FATBIN:
-      jitlink_input_type = NVJITLINK_INPUT_FATBIN;
-      break;
-    default:
-      jit_handle_cleanup();
-      return CUDA_ERROR_INVALID_VALUE;
+    std::lock_guard<std::mutex> lock(cc.mutex);
+    auto it = cc.entries.find(cache_key);
+    if (it != cc.entries.end())
+    {
+      cubin_size = it->second.cubin.size();
+      cubin.reset(new char[cubin_size]);
+      std::memcpy(cubin.get(), it->second.cubin.data(), cubin_size);
+    }
   }
 
-  try
+  if (!cubin)
   {
-    for (size_t i = 0; i < num_inputs; ++i)
-    {
-      if (input_list[i] != nullptr && input_sizes[i] > 0)
+    const std::string arch = std::format("-arch=sm_{0}{1}", cc_major, cc_minor);
+    constexpr size_t num_lto_args   = 2;
+    const char* lopts[num_lto_args] = {"-lto", arch.c_str()};
+
+    nvJitLinkHandle jit_handle{};
+    check(nvJitLinkCreate(&jit_handle, num_lto_args, lopts));
+
+    // RAII guard to ensure nvJitLinkDestroy is called on all paths.
+    auto jit_handle_cleanup = [&jit_handle]() {
+      if (jit_handle)
       {
-        check(nvJitLinkAddData(jit_handle, jitlink_input_type, input_list[i], input_sizes[i], "aot_input"));
+        nvJitLinkDestroy(&jit_handle);
+        jit_handle = nullptr;
+      }
+    };
+
+    try
+    {
+      for (size_t i = 0; i < num_inputs; ++i)
+      {
+        if (input_list[i] != nullptr && input_sizes[i] > 0)
+        {
+          check(nvJitLinkAddData(jit_handle, NVJITLINK_INPUT_ANY, input_list[i], input_sizes[i], "aot_input"));
+        }
+      }
+
+      auto jitlink_error = nvJitLinkComplete(jit_handle);
+      size_t log_size{};
+      check(nvJitLinkGetErrorLogSize(jit_handle, &log_size));
+      if (log_size > 1)
+      {
+        std::unique_ptr<char[]> log{new char[log_size]};
+        check(nvJitLinkGetErrorLog(jit_handle, log.get()));
+        std::cerr << log.get() << '\n';
+      }
+      check(jitlink_error);
+
+      bool output_ptx = false;
+      auto result     = nvJitLinkGetLinkedCubinSize(jit_handle, &cubin_size);
+      if (result != NVJITLINK_SUCCESS)
+      {
+        output_ptx = true;
+        check(nvJitLinkGetLinkedPtxSize(jit_handle, &cubin_size));
+      }
+
+      cubin.reset(new char[cubin_size]);
+      if (output_ptx)
+      {
+        check(nvJitLinkGetLinkedPtx(jit_handle, cubin.get()));
+      }
+      else
+      {
+        check(nvJitLinkGetLinkedCubin(jit_handle, cubin.get()));
+      }
+
+      jit_handle_cleanup();
+
+      // Store in cache.
+      {
+        std::lock_guard<std::mutex> lock(cc.mutex);
+        cc.entries[cache_key] = transform::cubin_cache_entry{
+          std::vector<char>(cubin.get(), cubin.get() + cubin_size)};
       }
     }
-
-    auto jitlink_error = nvJitLinkComplete(jit_handle);
-    size_t log_size{};
-    check(nvJitLinkGetErrorLogSize(jit_handle, &log_size));
-    if (log_size > 1)
+    catch (...)
     {
-      std::unique_ptr<char[]> log{new char[log_size]};
-      check(nvJitLinkGetErrorLog(jit_handle, log.get()));
-      std::cerr << log.get() << '\n';
+      jit_handle_cleanup();
+      throw;
     }
-    check(jitlink_error);
-
-    size_t cubin_size{};
-    bool output_ptx = false;
-    auto result     = nvJitLinkGetLinkedCubinSize(jit_handle, &cubin_size);
-    if (result != NVJITLINK_SUCCESS)
-    {
-      output_ptx = true;
-      check(nvJitLinkGetLinkedPtxSize(jit_handle, &cubin_size));
-    }
-
-    std::unique_ptr<char[]> cubin{new char[cubin_size]};
-    if (output_ptx)
-    {
-      check(nvJitLinkGetLinkedPtx(jit_handle, cubin.get()));
-    }
-    else
-    {
-      check(nvJitLinkGetLinkedCubin(jit_handle, cubin.get()));
-    }
-
-    jit_handle_cleanup();
-
-    check(cuLibraryLoadData(&build_ptr->library, cubin.get(), nullptr, nullptr, 0, nullptr, nullptr, 0));
-    check(cuLibraryGetKernel(&build_ptr->transform_kernel, build_ptr->library, kernel_lowered_name));
-
-    int loaded_bytes = 0;
-    for (int i = 0; i < num_input_iterators; ++i)
-    {
-      loaded_bytes += static_cast<int>(input_value_sizes[i]);
-    }
-
-    build_ptr->loaded_bytes_per_iteration = loaded_bytes;
-    build_ptr->cc                         = cc_major * 10 + cc_minor;
-    build_ptr->cubin                      = static_cast<void*>(cubin.release());
-    build_ptr->cubin_size                 = cubin_size;
-    build_ptr->cache                      = new transform::cache();
-
-    const int out_size  = static_cast<int>(output_value_size);
-    const auto out_info = cub::detail::iterator_info{out_size, out_size, true, true};
-
-    if (num_input_iterators == 1)
-    {
-      const auto inputs = cuda::std::array<cub::detail::iterator_info, 1>{cub::detail::iterator_info{
-        static_cast<int>(input_value_sizes[0]), static_cast<int>(input_value_sizes[0]), true, true}};
-      auto policy_sel   = cub::detail::transform::policy_selector<1>{false, true, inputs, out_info};
-      static_assert(std::is_trivially_copyable_v<decltype(policy_sel)>);
-      build_ptr->runtime_policy = std::malloc(sizeof(policy_sel));
-      std::memcpy(build_ptr->runtime_policy, &policy_sel, sizeof(policy_sel));
-    }
-    else
-    {
-      const auto inputs = cuda::std::array<cub::detail::iterator_info, 2>{
-        cub::detail::iterator_info{
-          static_cast<int>(input_value_sizes[0]), static_cast<int>(input_value_sizes[0]), true, true},
-        cub::detail::iterator_info{
-          static_cast<int>(input_value_sizes[1]), static_cast<int>(input_value_sizes[1]), true, true}};
-      auto policy_sel = cub::detail::transform::policy_selector<2>{false, true, inputs, out_info};
-      static_assert(std::is_trivially_copyable_v<decltype(policy_sel)>);
-      build_ptr->runtime_policy = std::malloc(sizeof(policy_sel));
-      std::memcpy(build_ptr->runtime_policy, &policy_sel, sizeof(policy_sel));
-    }
-
-    return CUDA_SUCCESS;
   }
-  catch (...)
+
+  check(cuLibraryLoadData(&build_ptr->library, cubin.get(), nullptr, nullptr, 0, nullptr, nullptr, 0));
+  check(cuLibraryGetKernel(&build_ptr->transform_kernel, build_ptr->library, kernel_lowered_name));
+
+  int loaded_bytes = 0;
+  for (int i = 0; i < num_input_iterators; ++i)
   {
-    jit_handle_cleanup();
-    throw;
+    loaded_bytes += static_cast<int>(input_value_sizes[i]);
   }
+
+  build_ptr->loaded_bytes_per_iteration = loaded_bytes;
+  build_ptr->cc                         = cc_major * 10 + cc_minor;
+  build_ptr->cubin                      = static_cast<void*>(cubin.release());
+  build_ptr->cubin_size                 = cubin_size;
+  build_ptr->cache                      = new transform::cache();
+
+  const int out_size  = static_cast<int>(output_value_size);
+  const auto out_info = cub::detail::iterator_info{out_size, out_size, true, true};
+
+  if (num_input_iterators == 1)
+  {
+    const auto inputs = cuda::std::array<cub::detail::iterator_info, 1>{cub::detail::iterator_info{
+      static_cast<int>(input_value_sizes[0]), static_cast<int>(input_value_sizes[0]), true, true}};
+    auto policy_sel   = cub::detail::transform::policy_selector<1>{false, true, inputs, out_info};
+    static_assert(std::is_trivially_copyable_v<decltype(policy_sel)>);
+    build_ptr->runtime_policy = std::malloc(sizeof(policy_sel));
+    std::memcpy(build_ptr->runtime_policy, &policy_sel, sizeof(policy_sel));
+  }
+  else
+  {
+    const auto inputs = cuda::std::array<cub::detail::iterator_info, 2>{
+      cub::detail::iterator_info{
+        static_cast<int>(input_value_sizes[0]), static_cast<int>(input_value_sizes[0]), true, true},
+      cub::detail::iterator_info{
+        static_cast<int>(input_value_sizes[1]), static_cast<int>(input_value_sizes[1]), true, true}};
+    auto policy_sel = cub::detail::transform::policy_selector<2>{false, true, inputs, out_info};
+    static_assert(std::is_trivially_copyable_v<decltype(policy_sel)>);
+    build_ptr->runtime_policy = std::malloc(sizeof(policy_sel));
+    std::memcpy(build_ptr->runtime_policy, &policy_sel, sizeof(policy_sel));
+  }
+
+  return CUDA_SUCCESS;
 }
 catch (const std::exception& exc)
 {
