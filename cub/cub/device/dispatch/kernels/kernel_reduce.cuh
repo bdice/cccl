@@ -81,6 +81,57 @@ finalize_and_store_aggregate(OutputIteratorT d_out, ReductionOpT, empty_problem_
   *d_out = block_aggregate;
 }
 
+// Device-side implementation of the multi-block reduce kernel.  Separated from the __global__
+// entry point so that extern "C" wrapper kernels (used by the AOT/LTO pipeline) can call the same
+// implementation without replicating the dispatch chain.
+template <typename PolicySelector,
+          typename InputIteratorT,
+          typename OffsetT,
+          typename ReductionOpT,
+          typename AccumT,
+          typename TransformOpT>
+#if _CCCL_HAS_CONCEPTS()
+  requires reduce_policy_selector<PolicySelector>
+#endif // _CCCL_HAS_CONCEPTS()
+_CCCL_DEVICE _CCCL_FORCEINLINE void DeviceReduceKernel_impl(
+  const InputIteratorT d_in,
+  AccumT* const d_out,
+  const OffsetT num_items,
+  GridEvenShare<OffsetT> even_share,
+  ReductionOpT reduction_op,
+  TransformOpT transform_op)
+{
+  static constexpr agent_reduce_policy policy = PolicySelector{}(::cuda::arch_id{CUB_PTX_ARCH / 10}).reduce;
+  // TODO(bgruber): pass policy directly as template argument to AgentReduce in C++20
+  using agent_policy_t =
+    AgentReducePolicy<policy.block_threads,
+                      policy.items_per_thread,
+                      AccumT,
+                      policy.vector_load_length,
+                      policy.block_algorithm,
+                      policy.load_modifier,
+                      NoScaling<policy.block_threads, policy.items_per_thread, AccumT>>;
+
+  // Thread block type for reducing input tiles
+  using AgentReduceT = AgentReduce<agent_policy_t, InputIteratorT, OffsetT, ReductionOpT, AccumT, TransformOpT>;
+
+  static_assert(sizeof(typename AgentReduceT::TempStorage) <= max_smem_per_block,
+                "cub::DeviceReduce ran out of CUDA shared memory, which we judged to be extremely unlikely. Please "
+                "file an issue at: https://github.com/NVIDIA/cccl/issues");
+
+  // Shared memory storage
+  __shared__ typename AgentReduceT::TempStorage temp_storage;
+
+  // Consume input tiles
+  AccumT block_aggregate = AgentReduceT(temp_storage, d_in, reduction_op, transform_op).ConsumeTiles(even_share);
+
+  // Output result
+  if (threadIdx.x == 0)
+  {
+    detail::uninitialized_copy_single(d_out + blockIdx.x, block_aggregate);
+  }
+}
+
 /**
  * @brief Reduce region kernel entry point (multi-block). Computes privatized
  *        reductions, one per thread block.
@@ -138,7 +189,32 @@ __launch_bounds__(int(PolicySelector{}(::cuda::arch_id{CUB_PTX_ARCH / 10}).reduc
   ReductionOpT reduction_op,
   TransformOpT transform_op)
 {
-  static constexpr agent_reduce_policy policy = PolicySelector{}(::cuda::arch_id{CUB_PTX_ARCH / 10}).reduce;
+  DeviceReduceKernel_impl<PolicySelector>(d_in, d_out, num_items, even_share, reduction_op, transform_op);
+}
+
+// Device-side implementation of the single-tile reduce kernel.  Separated from the __global__
+// entry point so that extern "C" wrapper kernels (used by the AOT/LTO pipeline) can call the same
+// implementation without replicating the dispatch chain.
+template <typename PolicySelector,
+          typename InputIteratorT,
+          typename OutputIteratorT,
+          typename OffsetT,
+          typename ReductionOpT,
+          typename InitT,
+          typename AccumT,
+          typename TransformOpT = ::cuda::std::identity>
+#if _CCCL_HAS_CONCEPTS()
+  requires reduce_policy_selector<PolicySelector>
+#endif // _CCCL_HAS_CONCEPTS()
+_CCCL_DEVICE _CCCL_FORCEINLINE void DeviceReduceSingleTileKernel_impl(
+  const InputIteratorT d_in,
+  OutputIteratorT d_out,
+  const OffsetT num_items,
+  ReductionOpT reduction_op,
+  const InitT init,
+  TransformOpT transform_op)
+{
+  static constexpr agent_reduce_policy policy = PolicySelector{}(::cuda::arch_id{CUB_PTX_ARCH / 10}).single_tile;
   // TODO(bgruber): pass policy directly as template argument to AgentReduce in C++20
   using agent_policy_t =
     AgentReducePolicy<policy.block_threads,
@@ -159,13 +235,25 @@ __launch_bounds__(int(PolicySelector{}(::cuda::arch_id{CUB_PTX_ARCH / 10}).reduc
   // Shared memory storage
   __shared__ typename AgentReduceT::TempStorage temp_storage;
 
+  // Check if empty problem
+  if (num_items == 0)
+  {
+    if (threadIdx.x == 0)
+    {
+      *d_out = detail::reduce::unwrap_empty_problem_init(init);
+    }
+
+    return;
+  }
+
   // Consume input tiles
-  AccumT block_aggregate = AgentReduceT(temp_storage, d_in, reduction_op, transform_op).ConsumeTiles(even_share);
+  AccumT block_aggregate =
+    AgentReduceT(temp_storage, d_in, reduction_op, transform_op).ConsumeRange(OffsetT(0), num_items);
 
   // Output result
   if (threadIdx.x == 0)
   {
-    detail::uninitialized_copy_single(d_out + blockIdx.x, block_aggregate);
+    detail::reduce::finalize_and_store_aggregate(d_out, reduction_op, init, block_aggregate);
   }
 }
 
@@ -231,49 +319,13 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(
                                        _CCCL_GRID_CONSTANT const InitT init,
                                        TransformOpT transform_op)
 {
-  static constexpr agent_reduce_policy policy = PolicySelector{}(::cuda::arch_id{CUB_PTX_ARCH / 10}).single_tile;
-  // TODO(bgruber): pass policy directly as template argument to AgentReduce in C++20
-  using agent_policy_t =
-    AgentReducePolicy<policy.block_threads,
-                      policy.items_per_thread,
-                      AccumT,
-                      policy.vector_load_length,
-                      policy.block_algorithm,
-                      policy.load_modifier,
-                      NoScaling<policy.block_threads, policy.items_per_thread, AccumT>>;
-
-  // Thread block type for reducing input tiles
-  using AgentReduceT = AgentReduce<agent_policy_t, InputIteratorT, OffsetT, ReductionOpT, AccumT, TransformOpT>;
-
-  static_assert(sizeof(typename AgentReduceT::TempStorage) <= max_smem_per_block,
-                "cub::DeviceReduce ran out of CUDA shared memory, which we judged to be extremely unlikely. Please "
-                "file an issue at: https://github.com/NVIDIA/cccl/issues");
-
-  // Shared memory storage
-  __shared__ typename AgentReduceT::TempStorage temp_storage;
-
-  // Check if empty problem
-  if (num_items == 0)
-  {
-    if (threadIdx.x == 0)
-    {
-      *d_out = detail::reduce::unwrap_empty_problem_init(init);
-    }
-
-    return;
-  }
-
-  // Consume input tiles
-  AccumT block_aggregate =
-    AgentReduceT(temp_storage, d_in, reduction_op, transform_op).ConsumeRange(OffsetT(0), num_items);
-
-  // Output result
-  if (threadIdx.x == 0)
-  {
-    detail::reduce::finalize_and_store_aggregate(d_out, reduction_op, init, block_aggregate);
-  }
+  DeviceReduceSingleTileKernel_impl<PolicySelector, InputIteratorT, OutputIteratorT, OffsetT, ReductionOpT, InitT, AccumT>(
+    d_in, d_out, num_items, reduction_op, init, transform_op);
 }
 
+// Device-side implementation of the nondeterministic atomic reduce kernel.  Separated from the
+// __global__ entry point so that extern "C" wrapper kernels (used by the AOT/LTO pipeline) can
+// call the same implementation without replicating the dispatch chain.
 template <typename PolicySelector,
           typename InputIteratorT,
           typename OutputIteratorT,
@@ -285,16 +337,14 @@ template <typename PolicySelector,
 #if _CCCL_HAS_CONCEPTS()
   requires reduce_policy_selector<PolicySelector>
 #endif // _CCCL_HAS_CONCEPTS()
-_CCCL_KERNEL_ATTRIBUTES __launch_bounds__(int(
-  PolicySelector{}(::cuda::arch_id{CUB_PTX_ARCH / 10})
-    .reduce_nondeterministic
-    .block_threads)) void NondeterministicDeviceReduceAtomicKernel(_CCCL_GRID_CONSTANT const InputIteratorT d_in,
-                                                                   _CCCL_GRID_CONSTANT const OutputIteratorT d_out,
-                                                                   _CCCL_GRID_CONSTANT const OffsetT num_items,
-                                                                   GridEvenShare<OffsetT> even_share,
-                                                                   ReductionOpT reduction_op,
-                                                                   _CCCL_GRID_CONSTANT const InitT init,
-                                                                   TransformOpT transform_op)
+_CCCL_DEVICE _CCCL_FORCEINLINE void NondeterministicDeviceReduceAtomicKernel_impl(
+  const InputIteratorT d_in,
+  const OutputIteratorT d_out,
+  const OffsetT num_items,
+  GridEvenShare<OffsetT> even_share,
+  ReductionOpT reduction_op,
+  const InitT init,
+  TransformOpT transform_op)
 {
   NV_IF_TARGET(NV_PROVIDES_SM_60,
                (),
@@ -346,6 +396,32 @@ _CCCL_KERNEL_ATTRIBUTES __launch_bounds__(int(
         blockIdx.x == 0 ? reduction_op(init, block_aggregate) : block_aggregate, ::cuda::memory_order_relaxed);),
       (atomicAdd(&d_out[0], blockIdx.x == 0 ? reduction_op(init, block_aggregate) : block_aggregate);));
   }
+}
+
+template <typename PolicySelector,
+          typename InputIteratorT,
+          typename OutputIteratorT,
+          typename OffsetT,
+          typename ReductionOpT,
+          typename AccumT,
+          typename InitT,
+          typename TransformOpT>
+#if _CCCL_HAS_CONCEPTS()
+  requires reduce_policy_selector<PolicySelector>
+#endif // _CCCL_HAS_CONCEPTS()
+_CCCL_KERNEL_ATTRIBUTES __launch_bounds__(int(
+  PolicySelector{}(::cuda::arch_id{CUB_PTX_ARCH / 10})
+    .reduce_nondeterministic
+    .block_threads)) void NondeterministicDeviceReduceAtomicKernel(_CCCL_GRID_CONSTANT const InputIteratorT d_in,
+                                                                   _CCCL_GRID_CONSTANT const OutputIteratorT d_out,
+                                                                   _CCCL_GRID_CONSTANT const OffsetT num_items,
+                                                                   GridEvenShare<OffsetT> even_share,
+                                                                   ReductionOpT reduction_op,
+                                                                   _CCCL_GRID_CONSTANT const InitT init,
+                                                                   TransformOpT transform_op)
+{
+  NondeterministicDeviceReduceAtomicKernel_impl<PolicySelector, InputIteratorT, OutputIteratorT, OffsetT, ReductionOpT, AccumT>(
+    d_in, d_out, num_items, even_share, reduction_op, init, transform_op);
 }
 } // namespace detail::reduce
 
