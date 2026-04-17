@@ -150,7 +150,7 @@ int main()
       input_list,
       input_sizes,
       2, // num_inputs: kernel + operator
-      CCCL_LTOIR_INPUT_OBJECT,
+      CCCL_LTOIR_INPUT_FATBIN,
       AOT_KERNEL_NAME,
       2, // num_input_iterators: binary transform
       input_value_sizes,

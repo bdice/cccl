@@ -40,12 +40,13 @@ add_custom_command(
 # by nvJitLink.
 function(add_ltoir_object target_name source_file)
   add_library(${target_name} OBJECT "${source_file}")
-  target_compile_options(${target_name} PRIVATE
-    $<$<COMPILE_LANGUAGE:CUDA>:-dc -dlto>
-  )
   set_target_properties(${target_name} PROPERTIES
     CUDA_SEPARABLE_COMPILATION ON
-    CUDA_RESOLVE_DEVICE_SYMBOLS OFF
+    CUDA_FATBIN_COMPILATION ON
+    POSITION_INDEPENDENT_CODE ON
+  )
+  target_compile_options(${target_name} PRIVATE
+    $<$<COMPILE_LANGUAGE:CUDA>:-dlto>
   )
   target_link_libraries(${target_name} PRIVATE CCCL::CCCL)
 endfunction()
