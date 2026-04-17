@@ -1,0 +1,86 @@
+// Auto-generated from reduce_kernel.cu.in — do not edit.
+//
+// Reduce kernels for: input @INPUT_TYPE@, output @OUTPUT_TYPE@, accum @ACCUM_TYPE@
+// Operator symbol: extern "C" __device__ void @OP_NAME@(const void*, const void*, void*)
+// Kernel entries:
+//   extern "C" __global__ void @SINGLE_TILE_KERNEL_NAME@(...)
+//   extern "C" __global__ void @REDUCTION_KERNEL_NAME@(...)
+//   extern "C" __global__ void @SINGLE_TILE_SECOND_KERNEL_NAME@(...)
+
+#include <cub/device/dispatch/tuning/tuning_reduce.cuh>
+#include <cub/device/dispatch/kernels/kernel_reduce.cuh>
+
+// Operator forward declaration — resolved at link time from operator LTO-IR.
+extern "C" __device__ void @OP_NAME@(const void*, const void*, void*);
+
+// Operator functor that wraps the extern "C" symbol.
+struct op_wrapper_t {
+  __device__ @ACCUM_TYPE@ operator()(const @ACCUM_TYPE@& lhs, const @ACCUM_TYPE@& rhs) const {
+    @ACCUM_TYPE@ result;
+    @OP_NAME@(&lhs, &rhs, &result);
+    return result;
+  }
+};
+
+using InputT   = @INPUT_TYPE@;
+using OutputT  = @OUTPUT_TYPE@;
+using AccumT   = @ACCUM_TYPE@;
+using OffsetT  = unsigned long long;
+
+using PolicySelector = cub::detail::reduce::policy_selector_from_types<AccumT, OffsetT, op_wrapper_t>;
+
+using namespace cub::detail::reduce;
+
+// ---------------------------------------------------------------------------
+// Kernel 1: Single-tile reduce (small problems, single block)
+// ---------------------------------------------------------------------------
+extern "C"
+__global__ __launch_bounds__(int(PolicySelector{}(::cuda::arch_id{CUB_PTX_ARCH / 10}).single_tile.block_threads), 1)
+void @SINGLE_TILE_KERNEL_NAME@(
+  _CCCL_GRID_CONSTANT const InputT* const d_in,
+  OutputT* d_out,
+  _CCCL_GRID_CONSTANT const OffsetT num_items,
+  op_wrapper_t reduction_op,
+  _CCCL_GRID_CONSTANT const AccumT init,
+  ::cuda::std::identity transform_op)
+{
+  DeviceReduceSingleTileKernel_impl<PolicySelector, const InputT*, OutputT*, OffsetT, op_wrapper_t, AccumT, AccumT>(
+    d_in, d_out, num_items, reduction_op, init, transform_op);
+}
+
+// ---------------------------------------------------------------------------
+// Kernel 2: Multi-block reduce (first pass, outputs per-block partials)
+// ---------------------------------------------------------------------------
+extern "C"
+__global__ __launch_bounds__(int(PolicySelector{}(::cuda::arch_id{CUB_PTX_ARCH / 10}).reduce.block_threads))
+void @REDUCTION_KERNEL_NAME@(
+  _CCCL_GRID_CONSTANT const InputT* const d_in,
+  _CCCL_GRID_CONSTANT AccumT* const d_out,
+  _CCCL_GRID_CONSTANT const OffsetT num_items,
+  cub::GridEvenShare<OffsetT> even_share,
+  op_wrapper_t reduction_op,
+  ::cuda::std::identity transform_op)
+{
+  DeviceReduceKernel_impl<PolicySelector, const InputT*, OffsetT, op_wrapper_t, AccumT>(
+    d_in, d_out, num_items, even_share, reduction_op, transform_op);
+}
+
+// ---------------------------------------------------------------------------
+// Kernel 3: Single-tile second pass (reduces per-block partials into final)
+// Uses AccumT* input, int offset, identity transform — matches CUB dispatch.
+// ---------------------------------------------------------------------------
+using SecondPassPolicySelector = cub::detail::reduce::policy_selector_from_types<AccumT, int, op_wrapper_t>;
+
+extern "C"
+__global__ __launch_bounds__(int(SecondPassPolicySelector{}(::cuda::arch_id{CUB_PTX_ARCH / 10}).single_tile.block_threads), 1)
+void @SINGLE_TILE_SECOND_KERNEL_NAME@(
+  _CCCL_GRID_CONSTANT AccumT* const d_in,
+  OutputT* d_out,
+  _CCCL_GRID_CONSTANT const int num_items,
+  op_wrapper_t reduction_op,
+  _CCCL_GRID_CONSTANT const AccumT init,
+  ::cuda::std::identity transform_op)
+{
+  DeviceReduceSingleTileKernel_impl<SecondPassPolicySelector, AccumT*, OutputT*, int, op_wrapper_t, AccumT, AccumT>(
+    d_in, d_out, num_items, reduction_op, init, transform_op);
+}

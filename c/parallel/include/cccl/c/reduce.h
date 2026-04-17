@@ -93,5 +93,29 @@ CCCL_C_API CUresult cccl_device_reduce_nondeterministic(
 
 CCCL_C_API CUresult cccl_device_reduce_cleanup(cccl_device_reduce_build_result_t* bld_ptr);
 
+// AOT (ahead-of-time) linking for reduce: accepts pre-compiled LTO-IR blobs
+// (or object files / fatbins containing LTO-IR) for the kernels and operator,
+// links them with nvJitLink, and loads the result.  No NVRTC compilation occurs.
+//
+// The three kernel names must be extern "C" symbols inside the linked result:
+//   single_tile_kernel_name:        single-block reduce (first-pass or small problems)
+//   reduction_kernel_name:          multi-block reduce (first pass)
+//   single_tile_second_kernel_name: single-block reduce (second pass, reduces partials)
+//
+// input_list / input_sizes / num_inputs: arrays describing blobs to link.
+// accum_type: type info for the accumulator (used for policy selection and size).
+// cc_major, cc_minor: target compute capability.
+CCCL_C_API CUresult cccl_device_reduce_link_ltoir(
+  cccl_device_reduce_build_result_t* build_ptr,
+  const char** input_list,
+  const size_t* input_sizes,
+  size_t num_inputs,
+  const char* single_tile_kernel_name,
+  const char* reduction_kernel_name,
+  const char* single_tile_second_kernel_name,
+  cccl_type_info accum_type,
+  int cc_major,
+  int cc_minor);
+
 CCCL_C_EXTERN_C_END
 // NOLINTEND(modernize-use-using)

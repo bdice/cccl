@@ -1,0 +1,10 @@
+{
+  "_types": [
+    {
+      "INPUT_TYPE": "int32_t",
+      "OUTPUT_TYPE": "int32_t",
+      "ACCUM_TYPE": "int32_t",
+      "TYPE_ABBREV": "i32"
+    }
+  ]
+}

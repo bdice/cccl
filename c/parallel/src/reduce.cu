@@ -19,7 +19,11 @@
 #include <cuda/std/variant>
 
 #include <format>
+#include <iostream>
 #include <memory>
+#include <mutex>
+#include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "jit_templates/templates/input_iterator.h"
@@ -33,6 +37,7 @@
 #include <cccl/c/reduce.h>
 #include <nvrtc/command_list.h>
 #include <nvrtc/ltoir_list_appender.h>
+#include <nvrtc/nvjitlink_helper.h>
 #include <util/build_utils.h>
 
 struct device_reduce_policy;
@@ -530,4 +535,118 @@ CUresult cccl_device_reduce_build(
     libcudacxx_path,
     ctk_path,
     nullptr);
+}
+
+CUresult cccl_device_reduce_link_ltoir(
+  cccl_device_reduce_build_result_t* build_ptr,
+  const char** input_list,
+  const size_t* input_sizes,
+  size_t num_inputs,
+  const char* single_tile_kernel_name,
+  const char* reduction_kernel_name,
+  const char* single_tile_second_kernel_name,
+  cccl_type_info accum_type,
+  int cc_major,
+  int cc_minor)
+try
+{
+  if (build_ptr == nullptr || input_list == nullptr || input_sizes == nullptr || num_inputs == 0
+      || single_tile_kernel_name == nullptr || reduction_kernel_name == nullptr
+      || single_tile_second_kernel_name == nullptr)
+  {
+    return CUDA_ERROR_INVALID_VALUE;
+  }
+
+  const std::string arch = std::format("-arch=sm_{0}{1}", cc_major, cc_minor);
+  constexpr size_t num_lto_args   = 2;
+  const char* lopts[num_lto_args] = {"-lto", arch.c_str()};
+
+  nvJitLinkHandle jit_handle{};
+  check(nvJitLinkCreate(&jit_handle, num_lto_args, lopts));
+
+  auto jit_handle_cleanup = [&jit_handle]() {
+    if (jit_handle)
+    {
+      nvJitLinkDestroy(&jit_handle);
+      jit_handle = nullptr;
+    }
+  };
+
+  std::unique_ptr<char[]> cubin;
+  size_t cubin_size{};
+
+  try
+  {
+    for (size_t i = 0; i < num_inputs; ++i)
+    {
+      if (input_list[i] != nullptr && input_sizes[i] > 0)
+      {
+        check(nvJitLinkAddData(jit_handle, NVJITLINK_INPUT_ANY, input_list[i], input_sizes[i], "aot_input"));
+      }
+    }
+
+    auto jitlink_error = nvJitLinkComplete(jit_handle);
+    size_t log_size{};
+    check(nvJitLinkGetErrorLogSize(jit_handle, &log_size));
+    if (log_size > 1)
+    {
+      std::unique_ptr<char[]> log{new char[log_size]};
+      check(nvJitLinkGetErrorLog(jit_handle, log.get()));
+      std::cerr << log.get() << '\n';
+    }
+    check(jitlink_error);
+
+    bool output_ptx = false;
+    auto result     = nvJitLinkGetLinkedCubinSize(jit_handle, &cubin_size);
+    if (result != NVJITLINK_SUCCESS)
+    {
+      output_ptx = true;
+      check(nvJitLinkGetLinkedPtxSize(jit_handle, &cubin_size));
+    }
+
+    cubin.reset(new char[cubin_size]);
+    if (output_ptx)
+    {
+      check(nvJitLinkGetLinkedPtx(jit_handle, cubin.get()));
+    }
+    else
+    {
+      check(nvJitLinkGetLinkedCubin(jit_handle, cubin.get()));
+    }
+
+    jit_handle_cleanup();
+  }
+  catch (...)
+  {
+    jit_handle_cleanup();
+    throw;
+  }
+
+  check(cuLibraryLoadData(&build_ptr->library, cubin.get(), nullptr, nullptr, 0, nullptr, nullptr, 0));
+  check(cuLibraryGetKernel(&build_ptr->single_tile_kernel, build_ptr->library, single_tile_kernel_name));
+  check(cuLibraryGetKernel(&build_ptr->reduction_kernel, build_ptr->library, reduction_kernel_name));
+  check(cuLibraryGetKernel(&build_ptr->single_tile_second_kernel, build_ptr->library, single_tile_second_kernel_name));
+  build_ptr->nondeterministic_atomic_kernel = nullptr;
+
+  build_ptr->cc               = cc_major * 10 + cc_minor;
+  build_ptr->cubin            = static_cast<void*>(cubin.release());
+  build_ptr->cubin_size       = cubin_size;
+  build_ptr->accumulator_size = accum_type.size;
+  build_ptr->determinism      = CCCL_RUN_TO_RUN;
+
+  // The AOT kernels use op_wrapper_t which classifies as op_kind_t::other.
+  const auto cub_accum_type = cccl_type_enum_to_cub_type(accum_type.type);
+  const int offset_size     = int{sizeof(OffsetT)};
+  auto* policy = new cub::detail::reduce::policy_selector{
+    cub_accum_type, cub::detail::op_kind_t::other, offset_size, static_cast<int>(accum_type.size)};
+  build_ptr->runtime_policy = policy;
+
+  return CUDA_SUCCESS;
+}
+catch (const std::exception& exc)
+{
+  fflush(stderr);
+  printf("\nEXCEPTION in cccl_device_reduce_link_ltoir(): %s\n", exc.what());
+  fflush(stdout);
+  return CUDA_ERROR_UNKNOWN;
 }
