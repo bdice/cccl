@@ -1013,9 +1013,9 @@ _CCCL_API constexpr int get_block_threads_helper()
 template <typename PolicySelector>
 inline constexpr int get_block_threads = get_block_threads_helper<PolicySelector>();
 
-// There is only one kernel for all algorithms, that dispatches based on the selected policy. It must be instantiated
-// with the same arguments for each algorithm. Only the device compiler will then select the implementation. This
-// saves some compile-time and binary size.
+// Device-side implementation of the transform kernel dispatch logic.  Separated from the __global__
+// entry point so that extern "C" wrapper kernels (used by the AOT/LTO pipeline) can call the same
+// implementation without replicating the dispatch chain.
 template <typename PolicySelector,
           typename Offset,
           typename Predicate,
@@ -1025,13 +1025,13 @@ template <typename PolicySelector,
 #if _CCCL_HAS_CONCEPTS()
   requires transform_policy_selector<PolicySelector>
 #endif // _CCCL_HAS_CONCEPTS()
-__launch_bounds__(get_block_threads<PolicySelector>) _CCCL_KERNEL_ATTRIBUTES void transform_kernel(
-  _CCCL_GRID_CONSTANT const Offset num_items,
-  _CCCL_GRID_CONSTANT const int num_elem_per_thread,
-  [[maybe_unused]] _CCCL_GRID_CONSTANT const bool can_vectorize,
-  _CCCL_GRID_CONSTANT const Predicate pred,
-  _CCCL_GRID_CONSTANT const F f,
-  _CCCL_GRID_CONSTANT const RandomAccessIteratorOut out,
+_CCCL_DEVICE _CCCL_FORCEINLINE void transform_kernel_impl(
+  const Offset num_items,
+  const int num_elem_per_thread,
+  [[maybe_unused]] const bool can_vectorize,
+  const Predicate pred,
+  const F f,
+  const RandomAccessIteratorOut out,
   kernel_arg<RandomAccessIteratorsIn>... ins)
 {
   _CCCL_ASSERT(blockDim.y == 1 && blockDim.z == 1, "transform_kernel only supports 1D blocks");
@@ -1097,6 +1097,31 @@ __launch_bounds__(get_block_threads<PolicySelector>) _CCCL_KERNEL_ATTRIBUTES voi
   {
     static_assert(!sizeof(Offset), "Algorithm not implemented");
   }
+}
+
+// There is only one kernel for all algorithms, that dispatches based on the selected policy. It must be instantiated
+// with the same arguments for each algorithm. Only the device compiler will then select the implementation. This
+// saves some compile-time and binary size.
+template <typename PolicySelector,
+          typename Offset,
+          typename Predicate,
+          typename F,
+          typename RandomAccessIteratorOut,
+          typename... RandomAccessIteratorsIn>
+#if _CCCL_HAS_CONCEPTS()
+  requires transform_policy_selector<PolicySelector>
+#endif // _CCCL_HAS_CONCEPTS()
+__launch_bounds__(get_block_threads<PolicySelector>) _CCCL_KERNEL_ATTRIBUTES void transform_kernel(
+  _CCCL_GRID_CONSTANT const Offset num_items,
+  _CCCL_GRID_CONSTANT const int num_elem_per_thread,
+  [[maybe_unused]] _CCCL_GRID_CONSTANT const bool can_vectorize,
+  _CCCL_GRID_CONSTANT const Predicate pred,
+  _CCCL_GRID_CONSTANT const F f,
+  _CCCL_GRID_CONSTANT const RandomAccessIteratorOut out,
+  kernel_arg<RandomAccessIteratorsIn>... ins)
+{
+  transform_kernel_impl<PolicySelector>(
+    num_items, num_elem_per_thread, can_vectorize, pred, f, out, ::cuda::std::move(ins)...);
 }
 } // namespace detail::transform
 

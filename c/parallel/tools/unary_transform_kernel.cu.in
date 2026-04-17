@@ -19,7 +19,6 @@ struct op_wrapper_t {
   }
 };
 
-// Policy selector — same logic the JIT path uses at runtime.
 using PolicySelector = cub::detail::transform::policy_selector_from_types<
   false,  // requires_stable_address
   true,   // dense_output (pointer output)
@@ -29,6 +28,7 @@ using OffsetT = long long;
 
 using namespace cub::detail::transform;
 
+// Thin extern "C" wrapper that delegates to the CUB __device__ implementation.
 extern "C"
 __global__ __launch_bounds__(get_block_threads<PolicySelector>)
 void @KERNEL_NAME@(
@@ -40,59 +40,10 @@ void @KERNEL_NAME@(
   _CCCL_GRID_CONSTANT @OUTPUT_TYPE@* const out,
   kernel_arg<@INPUT1_TYPE@*> in1)
 {
-  _CCCL_ASSERT(blockDim.y == 1 && blockDim.z == 1, "");
-  static constexpr transform_policy policy = PolicySelector{}(::cuda::arch_id{CUB_PTX_ARCH / 10});
-
-  if constexpr (policy.algorithm == Algorithm::prefetch)
-  {
-    transform_kernel_prefetch<
-      policy.prefetch.block_threads,
-      policy.prefetch.prefetch_byte_stride,
-      policy.prefetch.unroll_factor>(
-        num_items, num_elem_per_thread,
-        ::cuda::std::move(pred), ::cuda::std::move(f),
-        ::cuda::std::move(out),
-        ::cuda::std::move(in1.iterator));
-  }
-  else if constexpr (policy.algorithm == Algorithm::vectorized)
-  {
-    static_assert(::cuda::std::is_same_v<decltype(pred), const always_true_predicate>,
-                  "Cannot vectorize transform with a predicate");
-    transform_kernel_vectorized<
-      policy.vectorized.block_threads,
-      policy.vectorized.items_per_thread,
-      policy.vectorized.vec_size,
-      policy.prefetch.prefetch_byte_stride,
-      policy.prefetch.unroll_factor>(
-        num_items, num_elem_per_thread, can_vectorize,
-        ::cuda::std::move(f), ::cuda::std::move(out),
-        ::cuda::std::move(in1.iterator));
-  }
-  else if constexpr (policy.algorithm == Algorithm::memcpy_async)
-  {
-    NV_IF_TARGET(
-      NV_PROVIDES_SM_80,
-      (transform_kernel_ldgsts<
-        policy.async_copy.block_threads,
-        policy.async_copy.unroll_factor>(
-          num_items, num_elem_per_thread,
-          ::cuda::std::move(pred), ::cuda::std::move(f),
-          ::cuda::std::move(out),
-          ::cuda::std::move(in1.aligned_ptr));));
-  }
-  else if constexpr (policy.algorithm == Algorithm::ublkcp)
-  {
-    NV_IF_TARGET(
-      NV_PROVIDES_SM_90,
-      (transform_kernel_ublkcp<
-        policy.async_copy.block_threads,
-        policy.async_copy.bulk_copy_alignment,
-        policy.async_copy.unroll_factor>(
-          num_items, num_elem_per_thread,
-          ::cuda::std::move(pred), ::cuda::std::move(f),
-          ::cuda::std::move(out),
-          ::cuda::std::move(in1.aligned_ptr));));
-  }
+  transform_kernel_impl<PolicySelector>(
+    num_items, num_elem_per_thread, can_vectorize,
+    pred, f, out,
+    ::cuda::std::move(in1));
 }
 
 using @KERNEL_NAME@_func_t = void(
