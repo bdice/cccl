@@ -56,16 +56,17 @@ add_ltoir_object(op_sub_ltoir "${CMAKE_CURRENT_SOURCE_DIR}/op_sub.cu")
 add_ltoir_object(op_mul_ltoir "${CMAKE_CURRENT_SOURCE_DIR}/op_mul.cu")
 
 # --- Step 3: Embed the object files as C byte arrays ---
-# bin_to_c.cmake converts each .o into a .h with a byte array so the
-# host program doesn't need to read files from disk at runtime.
+# bin2c (from CUDA toolkit) converts each .o into a .h with a byte array
+# so the host program doesn't need to read files from disk at runtime.
+find_program(BIN2C bin2c PATHS ${CUDAToolkit_BIN_DIR} REQUIRED)
+
 function(embed_object target_name var_name output_header)
   add_custom_command(
     OUTPUT "${output_header}"
-    COMMAND ${CMAKE_COMMAND}
-      -DINPUT_FILE=$<TARGET_OBJECTS:${target_name}>
-      -DOUTPUT_FILE=${output_header}
-      -DVAR_NAME=${var_name}
-      -P "${CMAKE_CURRENT_SOURCE_DIR}/bin_to_c.cmake"
+    COMMAND ${BIN2C} --const --static --length
+      --name ${var_name}
+      $<TARGET_OBJECTS:${target_name}>
+      > "${output_header}"
     DEPENDS ${target_name}
     COMMENT "Embedding ${target_name} as ${var_name}"
     VERBATIM

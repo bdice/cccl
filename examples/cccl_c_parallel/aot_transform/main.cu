@@ -126,9 +126,9 @@ int main()
   };
 
   op_test ops[] = {
-    {"add", op_add_obj_data, op_add_obj_size, [](int32_t a, int32_t b) { return a + b; }},
-    {"sub", op_sub_obj_data, op_sub_obj_size, [](int32_t a, int32_t b) { return a - b; }},
-    {"mul", op_mul_obj_data, op_mul_obj_size, [](int32_t a, int32_t b) { return a * b; }},
+    {"add", op_add_obj, op_add_objLength, [](int32_t a, int32_t b) { return a + b; }},
+    {"sub", op_sub_obj, op_sub_objLength, [](int32_t a, int32_t b) { return a - b; }},
+    {"mul", op_mul_obj, op_mul_objLength, [](int32_t a, int32_t b) { return a * b; }},
   };
 
   const size_t input_value_sizes[] = {sizeof(int32_t), sizeof(int32_t)};
@@ -139,10 +139,10 @@ int main()
 
     // Link kernel object + operator object via nvJitLink. No NVRTC.
     const char* input_list[]  = {
-      reinterpret_cast<const char*>(kernel_obj_data),
+      reinterpret_cast<const char*>(kernel_obj),
       reinterpret_cast<const char*>(op.data),
     };
-    const size_t input_sizes[] = {kernel_obj_size, op.size};
+    const size_t input_sizes[] = {kernel_objLength, op.size};
 
     cccl_device_transform_build_result_t build{};
     CHECK_CU(cccl_device_transform_link_ltoir(
