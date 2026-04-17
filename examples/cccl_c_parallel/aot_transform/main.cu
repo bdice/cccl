@@ -10,13 +10,16 @@
 //      producing one kernel .cu per type combo.
 //   3. nvcc -dc -dlto compiles each kernel and operator .cu to fatbin with LTO-IR.
 //   4. bin2c embeds the fatbin bytes as C arrays in header files.
+//   5. Generated registration .cpp files auto-register each fatbin into a
+//      global fatbin_registry at static init time.
 //
 // Runtime flow:
-//   1. cccl_device_transform_link_ltoir links kernel + operator fatbins
+//   1. The host program looks up kernel and operator fatbins by name from the
+//      registry — no #include of individual bin2c headers needed.
+//   2. cccl_device_transform_link_ltoir links kernel + operator fatbins
 //      via nvJitLink, loads the cubin, and populates a build_result_t.
-//   2. cccl_device_binary_transform dispatches the kernel using CUB's
-//      full dispatch machinery (handles grid/block config, argument
-//      construction, algorithm selection).
+//   3. cccl_device_binary_transform dispatches the kernel using CUB's
+//      full dispatch machinery.
 
 #include <cstdint>
 #include <cstdio>
@@ -29,15 +32,7 @@
 #include <cccl/c/transform.h>
 #include <cccl/c/types.h>
 
-// Embedded kernel fatbins (one per type combination from the JSON matrix).
-#include "aot_binary_transform_i32_i32_i32_obj.h"
-#include "aot_binary_transform_f32_f32_f32_obj.h"
-#include "aot_binary_transform_f64_f64_f64_obj.h"
-
-// Embedded operator fatbins.
-#include "op_add_obj.h"
-#include "op_mul_obj.h"
-#include "op_sub_obj.h"
+#include "fatbin_registry.h"
 
 #define CHECK_CUDA(call)                                                \
   do                                                                    \
@@ -102,8 +97,16 @@ int main()
 
   printf("Device compute capability: sm_%d%d\n", cc_major, cc_minor);
 
-  // The kernel name includes the type abbreviation from the JSON matrix.
+  // Look up the kernel fatbin from the registry (registered at static init).
   const char* kernel_name = "aot_binary_transform_i32_i32_i32";
+  const auto& registry    = fatbin_registry::instance();
+  const auto* kernel_frag = registry.lookup(kernel_name);
+  if (!kernel_frag)
+  {
+    fprintf(stderr, "Kernel fragment '%s' not found in registry\n", kernel_name);
+    return 1;
+  }
+
   printf("Kernel symbol: %s\n", kernel_name);
 
   constexpr int N = 1024;
@@ -124,15 +127,14 @@ int main()
   struct op_test
   {
     const char* name;
-    const unsigned char* data;
-    size_t size;
+    const char* registry_name;
     int32_t (*expected)(int32_t, int32_t);
   };
 
   op_test ops[] = {
-    {"add", op_add_obj, op_add_objLength, [](int32_t a, int32_t b) { return a + b; }},
-    {"sub", op_sub_obj, op_sub_objLength, [](int32_t a, int32_t b) { return a - b; }},
-    {"mul", op_mul_obj, op_mul_objLength, [](int32_t a, int32_t b) { return a * b; }},
+    {"add", "op_add", [](int32_t a, int32_t b) { return a + b; }},
+    {"sub", "op_sub", [](int32_t a, int32_t b) { return a - b; }},
+    {"mul", "op_mul", [](int32_t a, int32_t b) { return a * b; }},
   };
 
   const size_t input_value_sizes[] = {sizeof(int32_t), sizeof(int32_t)};
@@ -141,12 +143,20 @@ int main()
   {
     printf("\n--- Testing operator: %s ---\n", op.name);
 
+    // Look up operator fatbin from the registry.
+    const auto* op_frag = registry.lookup(op.registry_name);
+    if (!op_frag)
+    {
+      fprintf(stderr, "Operator fragment '%s' not found in registry\n", op.registry_name);
+      return 1;
+    }
+
     // Link kernel fatbin + operator fatbin via nvJitLink. No NVRTC.
-    const char* input_list[]  = {
-      reinterpret_cast<const char*>(aot_binary_transform_i32_i32_i32_obj),
-      reinterpret_cast<const char*>(op.data),
+    const char* input_list[] = {
+      reinterpret_cast<const char*>(kernel_frag->data),
+      reinterpret_cast<const char*>(op_frag->data),
     };
-    const size_t input_sizes[] = {aot_binary_transform_i32_i32_i32_objLength, op.size};
+    const size_t input_sizes[] = {kernel_frag->size, op_frag->size};
 
     cccl_device_transform_build_result_t build{};
     CHECK_CU(cccl_device_transform_link_ltoir(

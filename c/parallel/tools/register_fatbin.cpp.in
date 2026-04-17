@@ -1,0 +1,12 @@
+// Auto-generated — do not edit.
+// Registers fatbin fragment "@FRAGMENT_NAME@" into the global registry.
+
+#include <cstdint>
+
+#include "@FATBIN_HEADER@"
+#include "fatbin_registry.h"
+
+static fatbin_registrar reg_@FRAGMENT_NAME@(
+  "@FRAGMENT_NAME@",
+  @FRAGMENT_NAME@_obj,
+  @FRAGMENT_NAME@_objLength);

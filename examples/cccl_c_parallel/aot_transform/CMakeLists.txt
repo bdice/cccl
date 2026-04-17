@@ -11,13 +11,14 @@ endif()
 
 find_package(CUDAToolkit REQUIRED)
 
-# Path to tools (templates, CMake modules).
+# Path to tools (templates, CMake modules, registry header).
 set(TOOLS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../c/parallel/tools")
 include("${TOOLS_DIR}/generate_transform_kernels.cmake")
 
-# --- Step 1: Generate kernel .cu files from JSON type matrix + .cu.in template ---
-# The JSON matrix defines type combinations; configure_file() expands each
-# entry against the .cu.in template to produce one kernel per type combo.
+# --- Step 1: Generate kernel fatbins from JSON type matrix ---
+# Each matrix entry produces a .cu (from template), a .fatbin (compiled),
+# a bin2c header, and a registration .cpp that auto-registers the fatbin
+# into the global fatbin_registry at static init time.
 set(GENERATED_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
 
 generate_transform_kernels(
@@ -26,15 +27,15 @@ generate_transform_kernels(
   OP_NAME        "op"
   KERNEL_PREFIX  "aot_binary_transform"
   OUTPUT_DIR     "${GENERATED_DIR}"
-  OUTPUT_SOURCES KERNEL_SOURCES
-  OUTPUT_TARGETS KERNEL_HEADERS
+  OUTPUT_SOURCES KERNEL_REG_SOURCES
   LINK_LIBRARIES CCCL::CCCL
 )
 
-# --- Step 2: Compile operators to LTO-IR fatbin objects ---
+# --- Step 2: Compile operators to LTO-IR fatbin objects + register them ---
 find_program(BIN2C bin2c PATHS ${CUDAToolkit_BIN_DIR} REQUIRED)
 
-function(add_ltoir_object target_name source_file)
+function(add_registered_operator target_name source_file fragment_name)
+  # Compile to fatbin with LTO-IR.
   add_library(${target_name} OBJECT "${source_file}")
   set_target_properties(${target_name} PROPERTIES
     CUDA_SEPARABLE_COMPILATION ON
@@ -45,47 +46,49 @@ function(add_ltoir_object target_name source_file)
     $<$<COMPILE_LANGUAGE:CUDA>:-dlto>
   )
   target_link_libraries(${target_name} PRIVATE CCCL::CCCL)
-endfunction()
 
-add_ltoir_object(op_add_ltoir "${CMAKE_CURRENT_SOURCE_DIR}/op_add.cu")
-add_ltoir_object(op_sub_ltoir "${CMAKE_CURRENT_SOURCE_DIR}/op_sub.cu")
-add_ltoir_object(op_mul_ltoir "${CMAKE_CURRENT_SOURCE_DIR}/op_mul.cu")
-
-# --- Step 3: Embed operator objects as C byte arrays ---
-function(embed_object target_name var_name output_header)
+  # Embed fatbin as C byte array.
+  set(FATBIN_HEADER "${fragment_name}_obj.h")
+  set(fatbin_header_path "${GENERATED_DIR}/${FATBIN_HEADER}")
   add_custom_command(
-    OUTPUT "${output_header}"
+    OUTPUT "${fatbin_header_path}"
     COMMAND ${BIN2C} --const --static --length
-      --name ${var_name}
+      --name ${fragment_name}_obj
       $<TARGET_OBJECTS:${target_name}>
-      > "${output_header}"
+      > "${fatbin_header_path}"
     DEPENDS ${target_name}
-    COMMENT "Embedding ${target_name} as ${var_name}"
+    COMMENT "Embedding ${target_name} as ${fragment_name}_obj"
     VERBATIM
   )
+
+  # Generate registration .cpp.
+  set(FRAGMENT_NAME "${fragment_name}")
+  set(register_cpp "${GENERATED_DIR}/register_${fragment_name}.cpp")
+  configure_file("${TOOLS_DIR}/register_fatbin.cpp.in" "${register_cpp}" @ONLY)
+  set_source_files_properties("${register_cpp}" PROPERTIES
+    OBJECT_DEPENDS "${fatbin_header_path}"
+  )
+
+  # Export the registration source to parent scope.
+  set(${target_name}_REG_SOURCE "${register_cpp}" PARENT_SCOPE)
 endfunction()
 
-set(EMBEDDED_DIR "${CMAKE_CURRENT_BINARY_DIR}/embedded")
-file(MAKE_DIRECTORY "${EMBEDDED_DIR}")
+add_registered_operator(op_add_ltoir "${CMAKE_CURRENT_SOURCE_DIR}/op_add.cu" "op_add")
+add_registered_operator(op_sub_ltoir "${CMAKE_CURRENT_SOURCE_DIR}/op_sub.cu" "op_sub")
+add_registered_operator(op_mul_ltoir "${CMAKE_CURRENT_SOURCE_DIR}/op_mul.cu" "op_mul")
 
-embed_object(op_add_ltoir op_add_obj "${EMBEDDED_DIR}/op_add_obj.h")
-embed_object(op_sub_ltoir op_sub_obj "${EMBEDDED_DIR}/op_sub_obj.h")
-embed_object(op_mul_ltoir op_mul_obj "${EMBEDDED_DIR}/op_mul_obj.h")
-
-# Collect all embedded headers: kernel headers from the matrix + operator headers.
-set(ALL_EMBEDDED_HEADERS
-  ${KERNEL_HEADERS}
-  "${EMBEDDED_DIR}/op_add_obj.h"
-  "${EMBEDDED_DIR}/op_sub_obj.h"
-  "${EMBEDDED_DIR}/op_mul_obj.h"
+# --- Step 3: Build the host program ---
+# All registration .cpp files are compiled into the executable. Their static
+# constructors auto-register fatbins into the global registry before main().
+add_executable(aot_transform
+  main.cu
+  ${KERNEL_REG_SOURCES}
+  ${op_add_ltoir_REG_SOURCE}
+  ${op_sub_ltoir_REG_SOURCE}
+  ${op_mul_ltoir_REG_SOURCE}
 )
-
-add_custom_target(embedded_objects DEPENDS ${ALL_EMBEDDED_HEADERS})
-
-# --- Step 4: Build the host program ---
-add_executable(aot_transform main.cu)
-target_include_directories(aot_transform PRIVATE "${GENERATED_DIR}" "${EMBEDDED_DIR}")
-add_dependencies(aot_transform embedded_objects)
+target_include_directories(aot_transform PRIVATE "${TOOLS_DIR}" "${GENERATED_DIR}")
+add_dependencies(aot_transform aot_binary_transform_fatbins)
 target_link_libraries(aot_transform PRIVATE
   CCCL::CCCL
   CUDA::cuda_driver

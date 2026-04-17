@@ -1,7 +1,9 @@
 # generate_transform_kernels.cmake
 #
 # Reads a JSON type matrix and generates one transform kernel per entry
-# using configure_file() with a .cu.in template.
+# using configure_file() with a .cu.in template.  Each kernel's fatbin is
+# embedded via bin2c and auto-registered into a global fatbin_registry
+# through a generated registration .cpp file.
 #
 # Usage:
 #   include(generate_transform_kernels)
@@ -11,8 +13,7 @@
 #     OP_NAME        "op"
 #     KERNEL_PREFIX  "aot_binary_transform"
 #     OUTPUT_DIR     "${CMAKE_CURRENT_BINARY_DIR}/generated"
-#     OUTPUT_SOURCES out_var   # list of generated .cu files
-#     OUTPUT_TARGETS out_var   # list of generated fatbin targets
+#     OUTPUT_SOURCES out_var   # list of registration .cpp files to compile
 #   )
 
 include_guard(GLOBAL)
@@ -23,7 +24,7 @@ find_program(BIN2C bin2c PATHS ${CUDAToolkit_BIN_DIR} REQUIRED)
 function(generate_transform_kernels)
   set(options)
   set(one_value TEMPLATE_FILE MATRIX_FILE OP_NAME KERNEL_PREFIX OUTPUT_DIR
-                OUTPUT_SOURCES OUTPUT_TARGETS)
+                OUTPUT_SOURCES)
   set(multi_value LINK_LIBRARIES)
 
   cmake_parse_arguments(_GEN "${options}" "${one_value}" "${multi_value}" ${ARGN})
@@ -52,14 +53,16 @@ json.dump(entries, sys.stdout)
     message(FATAL_ERROR "Failed to parse matrix JSON: ${err}")
   endif()
 
+  set(TOOLS_DIR "${CMAKE_CURRENT_FUNCTION_LIST_DIR}")
+
   file(MAKE_DIRECTORY "${_GEN_OUTPUT_DIR}")
 
   # Parse the JSON array length.
   string(JSON num_entries LENGTH "${matrix_json}")
   math(EXPR last "${num_entries} - 1")
 
-  set(sources "")
-  set(targets "")
+  set(all_registration_sources "")
+  set(all_fatbin_headers "")
 
   foreach(i RANGE "${last}")
     string(JSON entry GET "${matrix_json}" "${i}")
@@ -72,6 +75,7 @@ json.dump(entries, sys.stdout)
 
     set(OP_NAME "${_GEN_OP_NAME}")
     set(KERNEL_NAME "${_GEN_KERNEL_PREFIX}_${TYPE_ABBREV}")
+    set(FRAGMENT_NAME "${KERNEL_NAME}")
 
     # Generate .cu from template.
     set(kernel_cu "${_GEN_OUTPUT_DIR}/${KERNEL_NAME}.cu")
@@ -93,23 +97,36 @@ json.dump(entries, sys.stdout)
     endif()
 
     # Embed fatbin as C byte array.
-    set(header_file "${_GEN_OUTPUT_DIR}/${KERNEL_NAME}_obj.h")
+    set(FATBIN_HEADER "${KERNEL_NAME}_obj.h")
+    set(fatbin_header_path "${_GEN_OUTPUT_DIR}/${FATBIN_HEADER}")
     set(var_name "${KERNEL_NAME}_obj")
     add_custom_command(
-      OUTPUT "${header_file}"
+      OUTPUT "${fatbin_header_path}"
       COMMAND ${BIN2C} --const --static --length
         --name ${var_name}
         $<TARGET_OBJECTS:${target_name}>
-        > "${header_file}"
+        > "${fatbin_header_path}"
       DEPENDS ${target_name}
       COMMENT "Embedding ${target_name} as ${var_name}"
       VERBATIM
     )
 
-    list(APPEND sources "${kernel_cu}")
-    list(APPEND targets "${header_file}")
+    # Generate registration .cpp from template.
+    set(register_cpp "${_GEN_OUTPUT_DIR}/register_${KERNEL_NAME}.cpp")
+    configure_file("${TOOLS_DIR}/register_fatbin.cpp.in" "${register_cpp}" @ONLY)
+
+    list(APPEND all_registration_sources "${register_cpp}")
+    list(APPEND all_fatbin_headers "${fatbin_header_path}")
   endforeach()
 
-  set(${_GEN_OUTPUT_SOURCES} "${sources}" PARENT_SCOPE)
-  set(${_GEN_OUTPUT_TARGETS} "${targets}" PARENT_SCOPE)
+  # Create a custom target that all fatbin headers depend on.
+  add_custom_target(${_GEN_KERNEL_PREFIX}_fatbins DEPENDS ${all_fatbin_headers})
+
+  # Set properties on registration sources so they depend on their fatbin headers.
+  # The caller compiles these .cpp files; they #include the bin2c headers.
+  set_source_files_properties(${all_registration_sources} PROPERTIES
+    OBJECT_DEPENDS "${all_fatbin_headers}"
+  )
+
+  set(${_GEN_OUTPUT_SOURCES} "${all_registration_sources}" PARENT_SCOPE)
 endfunction()
