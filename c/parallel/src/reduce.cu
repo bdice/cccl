@@ -47,6 +47,53 @@ static_assert(std::is_same_v<cub::detail::choose_offset_t<OffsetT>, OffsetT>, "O
 
 namespace reduce
 {
+
+struct cubin_cache_entry
+{
+  std::vector<char> cubin;
+};
+
+struct cubin_cache
+{
+  std::mutex mutex;
+  std::unordered_map<std::string, cubin_cache_entry> entries;
+
+  static cubin_cache& instance()
+  {
+    static cubin_cache cache;
+    return cache;
+  }
+
+  static std::string make_key(
+    const char** input_list,
+    const size_t* input_sizes,
+    size_t num_inputs,
+    const char* single_tile_kernel_name,
+    const char* reduction_kernel_name,
+    const char* single_tile_second_kernel_name,
+    int cc_major,
+    int cc_minor)
+  {
+    std::string key;
+    key += std::format("sm_{}{}/", cc_major, cc_minor);
+    key += single_tile_kernel_name;
+    key += '/';
+    key += reduction_kernel_name;
+    key += '/';
+    key += single_tile_second_kernel_name;
+    key += '/';
+    for (size_t i = 0; i < num_inputs; ++i)
+    {
+      if (input_list[i] != nullptr && input_sizes[i] > 0)
+      {
+        key += std::to_string(std::hash<std::string_view>{}(std::string_view(input_list[i], input_sizes[i])));
+        key += ',';
+      }
+    }
+    return key;
+  }
+};
+
 static cccl_type_info get_accumulator_type(cccl_op_t /*op*/, cccl_iterator_t /*input_it*/, cccl_value_t init)
 {
   // TODO Should be decltype(op(init, *input_it)) but haven't implemented type arithmetic yet
@@ -557,69 +604,94 @@ try
     return CUDA_ERROR_INVALID_VALUE;
   }
 
-  const std::string arch = std::format("-arch=sm_{0}{1}", cc_major, cc_minor);
-  constexpr size_t num_lto_args   = 2;
-  const char* lopts[num_lto_args] = {"-lto", arch.c_str()};
-
-  nvJitLinkHandle jit_handle{};
-  check(nvJitLinkCreate(&jit_handle, num_lto_args, lopts));
-
-  auto jit_handle_cleanup = [&jit_handle]() {
-    if (jit_handle)
-    {
-      nvJitLinkDestroy(&jit_handle);
-      jit_handle = nullptr;
-    }
-  };
+  auto& cc = reduce::cubin_cache::instance();
+  std::string cache_key = reduce::cubin_cache::make_key(
+    input_list, input_sizes, num_inputs, single_tile_kernel_name, reduction_kernel_name,
+    single_tile_second_kernel_name, cc_major, cc_minor);
 
   std::unique_ptr<char[]> cubin;
   size_t cubin_size{};
 
-  try
   {
-    for (size_t i = 0; i < num_inputs; ++i)
+    std::lock_guard<std::mutex> lock(cc.mutex);
+    auto it = cc.entries.find(cache_key);
+    if (it != cc.entries.end())
     {
-      if (input_list[i] != nullptr && input_sizes[i] > 0)
+      cubin_size = it->second.cubin.size();
+      cubin.reset(new char[cubin_size]);
+      std::memcpy(cubin.get(), it->second.cubin.data(), cubin_size);
+    }
+  }
+
+  if (!cubin)
+  {
+    const std::string arch = std::format("-arch=sm_{0}{1}", cc_major, cc_minor);
+    constexpr size_t num_lto_args   = 2;
+    const char* lopts[num_lto_args] = {"-lto", arch.c_str()};
+
+    nvJitLinkHandle jit_handle{};
+    check(nvJitLinkCreate(&jit_handle, num_lto_args, lopts));
+
+    auto jit_handle_cleanup = [&jit_handle]() {
+      if (jit_handle)
       {
-        check(nvJitLinkAddData(jit_handle, NVJITLINK_INPUT_ANY, input_list[i], input_sizes[i], "aot_input"));
+        nvJitLinkDestroy(&jit_handle);
+        jit_handle = nullptr;
+      }
+    };
+
+    try
+    {
+      for (size_t i = 0; i < num_inputs; ++i)
+      {
+        if (input_list[i] != nullptr && input_sizes[i] > 0)
+        {
+          check(nvJitLinkAddData(jit_handle, NVJITLINK_INPUT_ANY, input_list[i], input_sizes[i], "aot_input"));
+        }
+      }
+
+      auto jitlink_error = nvJitLinkComplete(jit_handle);
+      size_t log_size{};
+      check(nvJitLinkGetErrorLogSize(jit_handle, &log_size));
+      if (log_size > 1)
+      {
+        std::unique_ptr<char[]> log{new char[log_size]};
+        check(nvJitLinkGetErrorLog(jit_handle, log.get()));
+        std::cerr << log.get() << '\n';
+      }
+      check(jitlink_error);
+
+      bool output_ptx = false;
+      auto result     = nvJitLinkGetLinkedCubinSize(jit_handle, &cubin_size);
+      if (result != NVJITLINK_SUCCESS)
+      {
+        output_ptx = true;
+        check(nvJitLinkGetLinkedPtxSize(jit_handle, &cubin_size));
+      }
+
+      cubin.reset(new char[cubin_size]);
+      if (output_ptx)
+      {
+        check(nvJitLinkGetLinkedPtx(jit_handle, cubin.get()));
+      }
+      else
+      {
+        check(nvJitLinkGetLinkedCubin(jit_handle, cubin.get()));
+      }
+
+      jit_handle_cleanup();
+
+      {
+        std::lock_guard<std::mutex> lock(cc.mutex);
+        cc.entries[cache_key] =
+          reduce::cubin_cache_entry{std::vector<char>(cubin.get(), cubin.get() + cubin_size)};
       }
     }
-
-    auto jitlink_error = nvJitLinkComplete(jit_handle);
-    size_t log_size{};
-    check(nvJitLinkGetErrorLogSize(jit_handle, &log_size));
-    if (log_size > 1)
+    catch (...)
     {
-      std::unique_ptr<char[]> log{new char[log_size]};
-      check(nvJitLinkGetErrorLog(jit_handle, log.get()));
-      std::cerr << log.get() << '\n';
+      jit_handle_cleanup();
+      throw;
     }
-    check(jitlink_error);
-
-    bool output_ptx = false;
-    auto result     = nvJitLinkGetLinkedCubinSize(jit_handle, &cubin_size);
-    if (result != NVJITLINK_SUCCESS)
-    {
-      output_ptx = true;
-      check(nvJitLinkGetLinkedPtxSize(jit_handle, &cubin_size));
-    }
-
-    cubin.reset(new char[cubin_size]);
-    if (output_ptx)
-    {
-      check(nvJitLinkGetLinkedPtx(jit_handle, cubin.get()));
-    }
-    else
-    {
-      check(nvJitLinkGetLinkedCubin(jit_handle, cubin.get()));
-    }
-
-    jit_handle_cleanup();
-  }
-  catch (...)
-  {
-    jit_handle_cleanup();
-    throw;
   }
 
   check(cuLibraryLoadData(&build_ptr->library, cubin.get(), nullptr, nullptr, 0, nullptr, nullptr, 0));
