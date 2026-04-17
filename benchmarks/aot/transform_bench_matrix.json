@@ -1,0 +1,28 @@
+{
+  "_types": [
+    {
+      "INPUT1_TYPE": "int32_t",
+      "INPUT2_TYPE": "int32_t",
+      "OUTPUT_TYPE": "int32_t",
+      "TYPE_ABBREV": "i32"
+    },
+    {
+      "INPUT1_TYPE": "int64_t",
+      "INPUT2_TYPE": "int64_t",
+      "OUTPUT_TYPE": "int64_t",
+      "TYPE_ABBREV": "i64"
+    },
+    {
+      "INPUT1_TYPE": "float",
+      "INPUT2_TYPE": "float",
+      "OUTPUT_TYPE": "float",
+      "TYPE_ABBREV": "f32"
+    },
+    {
+      "INPUT1_TYPE": "double",
+      "INPUT2_TYPE": "double",
+      "OUTPUT_TYPE": "double",
+      "TYPE_ABBREV": "f64"
+    }
+  ]
+}
