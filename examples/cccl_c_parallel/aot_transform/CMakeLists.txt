@@ -11,27 +11,23 @@ endif()
 
 find_package(CUDAToolkit REQUIRED)
 
-# The kernel name is fixed at codegen time via extern "C" linkage.
+# Path to .cu.in templates (used by configure_file).
+set(TEMPLATE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../c/parallel/tools")
+
+# --- Step 1: Generate the kernel .cu file from a .cu.in template ---
+# Uses CMake configure_file() with @VAR@ substitution, matching the cuVS
+# LTO kernel generation pattern.
+set(INPUT1_TYPE "int32_t")
+set(INPUT2_TYPE "int32_t")
+set(OUTPUT_TYPE "int32_t")
+set(OP_NAME "op")
 set(KERNEL_NAME "aot_binary_transform")
 
-# Path to the codegen tool.
-set(CODEGEN_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/../../../c/parallel/tools/gen_transform_kernel.py")
-
-# --- Step 1: Generate the kernel .cu file from type descriptors ---
 set(GENERATED_KERNEL_CU "${CMAKE_CURRENT_BINARY_DIR}/generated_kernel.cu")
-add_custom_command(
-  OUTPUT "${GENERATED_KERNEL_CU}"
-  COMMAND python3 "${CODEGEN_SCRIPT}"
-    --input1-type int
-    --input2-type int
-    --output-type int
-    --op-name op
-    --op-arity binary
-    --kernel-name "${KERNEL_NAME}"
-    -o "${GENERATED_KERNEL_CU}"
-  DEPENDS "${CODEGEN_SCRIPT}"
-  COMMENT "Generating CUB transform kernel .cu for (int, int) -> int"
-  VERBATIM
+configure_file(
+  "${TEMPLATE_DIR}/binary_transform_kernel.cu.in"
+  "${GENERATED_KERNEL_CU}"
+  @ONLY
 )
 
 # --- Step 2: Compile kernel and operators to LTO-IR object files ---

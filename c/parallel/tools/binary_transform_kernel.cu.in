@@ -1,0 +1,105 @@
+// Auto-generated from binary_transform_kernel.cu.in — do not edit.
+//
+// Binary transform kernel: (@INPUT1_TYPE@, @INPUT2_TYPE@) -> @OUTPUT_TYPE@
+// Operator symbol: extern "C" __device__ void @OP_NAME@(const void*, const void*, void*)
+// Kernel entry:    extern "C" __global__ void @KERNEL_NAME@(...)
+
+#include <cub/device/dispatch/tuning/tuning_transform.cuh>
+#include <cub/device/dispatch/kernels/kernel_transform.cuh>
+
+// Operator forward declaration — resolved at link time from operator LTO-IR.
+extern "C" __device__ void @OP_NAME@(const void*, const void*, void*);
+
+// Operator functor that wraps the extern "C" symbol.
+struct op_wrapper_t {
+  __device__ @OUTPUT_TYPE@ operator()(const @INPUT1_TYPE@& lhs, const @INPUT2_TYPE@& rhs) const {
+    @OUTPUT_TYPE@ result;
+    @OP_NAME@(&lhs, &rhs, &result);
+    return result;
+  }
+};
+
+// Policy selector — same logic the JIT path uses at runtime.
+using PolicySelector = cub::detail::transform::policy_selector_from_types<
+  false,  // requires_stable_address
+  true,   // dense_output (pointer output)
+  ::cuda::std::tuple<@INPUT1_TYPE@*, @INPUT2_TYPE@*>,
+  @OUTPUT_TYPE@*>;
+using OffsetT = long long;
+
+using namespace cub::detail::transform;
+
+// Kernel with a fixed extern "C" name.  The body replicates the CUB
+// transform_kernel dispatch so we get a known symbol without mangling.
+extern "C"
+__global__ __launch_bounds__(get_block_threads<PolicySelector>)
+void @KERNEL_NAME@(
+  _CCCL_GRID_CONSTANT const OffsetT num_items,
+  _CCCL_GRID_CONSTANT const int num_elem_per_thread,
+  [[maybe_unused]] _CCCL_GRID_CONSTANT const bool can_vectorize,
+  _CCCL_GRID_CONSTANT const always_true_predicate pred,
+  _CCCL_GRID_CONSTANT const op_wrapper_t f,
+  _CCCL_GRID_CONSTANT @OUTPUT_TYPE@* const out,
+  kernel_arg<@INPUT1_TYPE@*> in1,
+  kernel_arg<@INPUT2_TYPE@*> in2)
+{
+  _CCCL_ASSERT(blockDim.y == 1 && blockDim.z == 1, "");
+  static constexpr transform_policy policy = PolicySelector{}(::cuda::arch_id{CUB_PTX_ARCH / 10});
+
+  if constexpr (policy.algorithm == Algorithm::prefetch)
+  {
+    transform_kernel_prefetch<
+      policy.prefetch.block_threads,
+      policy.prefetch.prefetch_byte_stride,
+      policy.prefetch.unroll_factor>(
+        num_items, num_elem_per_thread,
+        ::cuda::std::move(pred), ::cuda::std::move(f),
+        ::cuda::std::move(out),
+        ::cuda::std::move(in1.iterator), ::cuda::std::move(in2.iterator));
+  }
+  else if constexpr (policy.algorithm == Algorithm::vectorized)
+  {
+    static_assert(::cuda::std::is_same_v<decltype(pred), const always_true_predicate>,
+                  "Cannot vectorize transform with a predicate");
+    transform_kernel_vectorized<
+      policy.vectorized.block_threads,
+      policy.vectorized.items_per_thread,
+      policy.vectorized.vec_size,
+      policy.prefetch.prefetch_byte_stride,
+      policy.prefetch.unroll_factor>(
+        num_items, num_elem_per_thread, can_vectorize,
+        ::cuda::std::move(f), ::cuda::std::move(out),
+        ::cuda::std::move(in1.iterator), ::cuda::std::move(in2.iterator));
+  }
+  else if constexpr (policy.algorithm == Algorithm::memcpy_async)
+  {
+    NV_IF_TARGET(
+      NV_PROVIDES_SM_80,
+      (transform_kernel_ldgsts<
+        policy.async_copy.block_threads,
+        policy.async_copy.unroll_factor>(
+          num_items, num_elem_per_thread,
+          ::cuda::std::move(pred), ::cuda::std::move(f),
+          ::cuda::std::move(out),
+          ::cuda::std::move(in1.aligned_ptr), ::cuda::std::move(in2.aligned_ptr));));
+  }
+  else if constexpr (policy.algorithm == Algorithm::ublkcp)
+  {
+    NV_IF_TARGET(
+      NV_PROVIDES_SM_90,
+      (transform_kernel_ublkcp<
+        policy.async_copy.block_threads,
+        policy.async_copy.bulk_copy_alignment,
+        policy.async_copy.unroll_factor>(
+          num_items, num_elem_per_thread,
+          ::cuda::std::move(pred), ::cuda::std::move(f),
+          ::cuda::std::move(out),
+          ::cuda::std::move(in1.aligned_ptr), ::cuda::std::move(in2.aligned_ptr));));
+  }
+}
+
+using @KERNEL_NAME@_func_t = void(
+  OffsetT, int, bool, always_true_predicate, op_wrapper_t,
+  @OUTPUT_TYPE@*, kernel_arg<@INPUT1_TYPE@*>, kernel_arg<@INPUT2_TYPE@*>);
+static_assert(::cuda::std::is_same_v<decltype(@KERNEL_NAME@), @KERNEL_NAME@_func_t>,
+              "Kernel signature does not match expected function type");
