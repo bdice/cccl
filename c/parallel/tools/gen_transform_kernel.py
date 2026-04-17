@@ -171,6 +171,12 @@ def generate_binary_transform_kernel(
                   ::cuda::std::move(in1.aligned_ptr), ::cuda::std::move(in2.aligned_ptr));));
           }}
         }}
+
+        using {kernel_name}_func_t = void(
+          OffsetT, int, bool, always_true_predicate, op_wrapper_t,
+          {output_type}*, kernel_arg<{input1_type}*>, kernel_arg<{input2_type}*>);
+        static_assert(::cuda::std::is_same_v<decltype({kernel_name}), {kernel_name}_func_t>,
+                      "Kernel signature does not match expected function type");
     """)
 
 
@@ -275,6 +281,12 @@ def generate_unary_transform_kernel(
                   ::cuda::std::move(in1.aligned_ptr));));
           }}
         }}
+
+        using {kernel_name}_func_t = void(
+          OffsetT, int, bool, always_true_predicate, op_wrapper_t,
+          {output_type}*, kernel_arg<{input_type}*>);
+        static_assert(::cuda::std::is_same_v<decltype({kernel_name}), {kernel_name}_func_t>,
+                      "Kernel signature does not match expected function type");
     """)
 
 
