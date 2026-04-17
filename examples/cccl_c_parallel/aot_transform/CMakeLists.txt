@@ -11,29 +11,29 @@ endif()
 
 find_package(CUDAToolkit REQUIRED)
 
-# Path to .cu.in templates (used by configure_file).
-set(TEMPLATE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../c/parallel/tools")
+# Path to tools (templates, CMake modules).
+set(TOOLS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../c/parallel/tools")
+include("${TOOLS_DIR}/generate_transform_kernels.cmake")
 
-# --- Step 1: Generate the kernel .cu file from a .cu.in template ---
-# Uses CMake configure_file() with @VAR@ substitution, matching the cuVS
-# LTO kernel generation pattern.
-set(INPUT1_TYPE "int32_t")
-set(INPUT2_TYPE "int32_t")
-set(OUTPUT_TYPE "int32_t")
-set(OP_NAME "op")
-set(KERNEL_NAME "aot_binary_transform")
+# --- Step 1: Generate kernel .cu files from JSON type matrix + .cu.in template ---
+# The JSON matrix defines type combinations; configure_file() expands each
+# entry against the .cu.in template to produce one kernel per type combo.
+set(GENERATED_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
 
-set(GENERATED_KERNEL_CU "${CMAKE_CURRENT_BINARY_DIR}/generated_kernel.cu")
-configure_file(
-  "${TEMPLATE_DIR}/binary_transform_kernel.cu.in"
-  "${GENERATED_KERNEL_CU}"
-  @ONLY
+generate_transform_kernels(
+  TEMPLATE_FILE  "${TOOLS_DIR}/binary_transform_kernel.cu.in"
+  MATRIX_FILE    "${CMAKE_CURRENT_SOURCE_DIR}/transform_matrix.json"
+  OP_NAME        "op"
+  KERNEL_PREFIX  "aot_binary_transform"
+  OUTPUT_DIR     "${GENERATED_DIR}"
+  OUTPUT_SOURCES KERNEL_SOURCES
+  OUTPUT_TARGETS KERNEL_HEADERS
+  LINK_LIBRARIES CCCL::CCCL
 )
 
-# --- Step 2: Compile kernel and operators to LTO-IR object files ---
-# nvcc -dc -dlto produces relocatable objects containing LTO-IR.
-# These are NOT linked by the build system — they are linked at runtime
-# by nvJitLink.
+# --- Step 2: Compile operators to LTO-IR fatbin objects ---
+find_program(BIN2C bin2c PATHS ${CUDAToolkit_BIN_DIR} REQUIRED)
+
 function(add_ltoir_object target_name source_file)
   add_library(${target_name} OBJECT "${source_file}")
   set_target_properties(${target_name} PROPERTIES
@@ -47,16 +47,11 @@ function(add_ltoir_object target_name source_file)
   target_link_libraries(${target_name} PRIVATE CCCL::CCCL)
 endfunction()
 
-add_ltoir_object(kernel_ltoir "${GENERATED_KERNEL_CU}")
 add_ltoir_object(op_add_ltoir "${CMAKE_CURRENT_SOURCE_DIR}/op_add.cu")
 add_ltoir_object(op_sub_ltoir "${CMAKE_CURRENT_SOURCE_DIR}/op_sub.cu")
 add_ltoir_object(op_mul_ltoir "${CMAKE_CURRENT_SOURCE_DIR}/op_mul.cu")
 
-# --- Step 3: Embed the object files as C byte arrays ---
-# bin2c (from CUDA toolkit) converts each .o into a .h with a byte array
-# so the host program doesn't need to read files from disk at runtime.
-find_program(BIN2C bin2c PATHS ${CUDAToolkit_BIN_DIR} REQUIRED)
-
+# --- Step 3: Embed operator objects as C byte arrays ---
 function(embed_object target_name var_name output_header)
   add_custom_command(
     OUTPUT "${output_header}"
@@ -73,25 +68,23 @@ endfunction()
 set(EMBEDDED_DIR "${CMAKE_CURRENT_BINARY_DIR}/embedded")
 file(MAKE_DIRECTORY "${EMBEDDED_DIR}")
 
-embed_object(kernel_ltoir kernel_obj "${EMBEDDED_DIR}/kernel_obj.h")
 embed_object(op_add_ltoir op_add_obj "${EMBEDDED_DIR}/op_add_obj.h")
 embed_object(op_sub_ltoir op_sub_obj "${EMBEDDED_DIR}/op_sub_obj.h")
 embed_object(op_mul_ltoir op_mul_obj "${EMBEDDED_DIR}/op_mul_obj.h")
 
-add_custom_target(embedded_objects DEPENDS
-  "${EMBEDDED_DIR}/kernel_obj.h"
+# Collect all embedded headers: kernel headers from the matrix + operator headers.
+set(ALL_EMBEDDED_HEADERS
+  ${KERNEL_HEADERS}
   "${EMBEDDED_DIR}/op_add_obj.h"
   "${EMBEDDED_DIR}/op_sub_obj.h"
   "${EMBEDDED_DIR}/op_mul_obj.h"
 )
 
+add_custom_target(embedded_objects DEPENDS ${ALL_EMBEDDED_HEADERS})
+
 # --- Step 4: Build the host program ---
-# Links against cccl.c.parallel for the link+load and execute functions.
 add_executable(aot_transform main.cu)
-target_include_directories(aot_transform PRIVATE "${EMBEDDED_DIR}")
-target_compile_definitions(aot_transform PRIVATE
-  AOT_KERNEL_NAME="${KERNEL_NAME}"
-)
+target_include_directories(aot_transform PRIVATE "${GENERATED_DIR}" "${EMBEDDED_DIR}")
 add_dependencies(aot_transform embedded_objects)
 target_link_libraries(aot_transform PRIVATE
   CCCL::CCCL

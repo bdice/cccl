@@ -5,14 +5,14 @@
 // No NVRTC is used anywhere in this pipeline.
 //
 // Build-time flow:
-//   1. gen_transform_kernel.py generates a .cu that instantiates the CUB
-//      transform kernel for (int, int) -> int.
-//   2. nvcc -dc -dlto compiles the kernel .cu and each operator .cu to
-//      relocatable objects containing LTO-IR.
-//   3. The object bytes are embedded into this binary as C arrays.
+//   1. A JSON type matrix defines type combinations (e.g. int32, float, double).
+//   2. CMake's configure_file() expands a .cu.in template for each combination,
+//      producing one kernel .cu per type combo.
+//   3. nvcc -dc -dlto compiles each kernel and operator .cu to fatbin with LTO-IR.
+//   4. bin2c embeds the fatbin bytes as C arrays in header files.
 //
 // Runtime flow:
-//   1. cccl_device_transform_link_ltoir links kernel + operator objects
+//   1. cccl_device_transform_link_ltoir links kernel + operator fatbins
 //      via nvJitLink, loads the cubin, and populates a build_result_t.
 //   2. cccl_device_binary_transform dispatches the kernel using CUB's
 //      full dispatch machinery (handles grid/block config, argument
@@ -29,14 +29,15 @@
 #include <cccl/c/transform.h>
 #include <cccl/c/types.h>
 
-// Embedded object files (generated at build time).
-#include "kernel_obj.h"
+// Embedded kernel fatbins (one per type combination from the JSON matrix).
+#include "aot_binary_transform_i32_i32_i32_obj.h"
+#include "aot_binary_transform_f32_f32_f32_obj.h"
+#include "aot_binary_transform_f64_f64_f64_obj.h"
+
+// Embedded operator fatbins.
 #include "op_add_obj.h"
 #include "op_mul_obj.h"
 #include "op_sub_obj.h"
-
-// AOT_KERNEL_NAME is defined by CMake — it's the extern "C" kernel name
-// from the generated .cu file. No mangling, no nm, no cuobjdump.
 
 #define CHECK_CUDA(call)                                                \
   do                                                                    \
@@ -100,7 +101,10 @@ int main()
   CHECK_CU(cuDeviceGetAttribute(&cc_minor, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, device));
 
   printf("Device compute capability: sm_%d%d\n", cc_major, cc_minor);
-  printf("Kernel symbol: %s\n", AOT_KERNEL_NAME);
+
+  // The kernel name includes the type abbreviation from the JSON matrix.
+  const char* kernel_name = "aot_binary_transform_i32_i32_i32";
+  printf("Kernel symbol: %s\n", kernel_name);
 
   constexpr int N = 1024;
   std::vector<int32_t> h_a(N), h_b(N), h_out(N);
@@ -137,12 +141,12 @@ int main()
   {
     printf("\n--- Testing operator: %s ---\n", op.name);
 
-    // Link kernel object + operator object via nvJitLink. No NVRTC.
+    // Link kernel fatbin + operator fatbin via nvJitLink. No NVRTC.
     const char* input_list[]  = {
-      reinterpret_cast<const char*>(kernel_obj),
+      reinterpret_cast<const char*>(aot_binary_transform_i32_i32_i32_obj),
       reinterpret_cast<const char*>(op.data),
     };
-    const size_t input_sizes[] = {kernel_objLength, op.size};
+    const size_t input_sizes[] = {aot_binary_transform_i32_i32_i32_objLength, op.size};
 
     cccl_device_transform_build_result_t build{};
     CHECK_CU(cccl_device_transform_link_ltoir(
@@ -151,7 +155,7 @@ int main()
       input_sizes,
       2, // num_inputs: kernel + operator
       CCCL_LTOIR_INPUT_FATBIN,
-      AOT_KERNEL_NAME,
+      kernel_name,
       2, // num_input_iterators: binary transform
       input_value_sizes,
       sizeof(int32_t), // output_value_size
