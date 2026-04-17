@@ -107,5 +107,39 @@ CCCL_C_API CUresult cccl_device_binary_transform(
 
 CCCL_C_API CUresult cccl_device_transform_cleanup(cccl_device_transform_build_result_t* bld_ptr);
 
+typedef enum cccl_ltoir_input_type
+{
+  CCCL_LTOIR_INPUT_LTOIR  = 0, // Raw LTO-IR blob
+  CCCL_LTOIR_INPUT_OBJECT = 1, // Relocatable object (nvcc -dc -dlto output)
+  CCCL_LTOIR_INPUT_FATBIN = 2, // Fatbin container
+} cccl_ltoir_input_type;
+
+// AOT (ahead-of-time) linking: accepts pre-compiled LTO-IR blobs (or object
+// files / fatbins containing LTO-IR) for the kernel and operator(s), links
+// them with nvJitLink, and loads the result.  No NVRTC compilation occurs.
+//
+// The kernel_lowered_name must be the symbol name of the kernel entry
+// point inside the linked result (use extern "C" linkage for unmangled names).
+//
+// input_list / input_sizes / num_inputs: arrays describing blobs to link.
+// input_type: format of the blobs (LTO-IR, object, or fatbin).
+// kernel_lowered_name: name of the __global__ kernel.
+// num_input_iterators: 1 for unary, 2 for binary transform.
+// input_value_sizes: array of value_type sizes for each input iterator.
+// output_value_size: size of the output value type.
+// cc_major, cc_minor: target compute capability.
+CCCL_C_API CUresult cccl_device_transform_link_ltoir(
+  cccl_device_transform_build_result_t* build_ptr,
+  const char** input_list,
+  const size_t* input_sizes,
+  size_t num_inputs,
+  cccl_ltoir_input_type input_type,
+  const char* kernel_lowered_name,
+  int num_input_iterators,
+  const size_t* input_value_sizes,
+  size_t output_value_size,
+  int cc_major,
+  int cc_minor);
+
 CCCL_C_EXTERN_C_END
 // NOLINTEND(modernize-use-using)
