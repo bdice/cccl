@@ -141,5 +141,7 @@ CCCL_C_API CUresult cccl_device_transform_link_ltoir(
   int cc_major,
   int cc_minor);
 
+CCCL_C_API void cccl_device_transform_clear_cache(void);
+
 CCCL_C_EXTERN_C_END
 // NOLINTEND(modernize-use-using)

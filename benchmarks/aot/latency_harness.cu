@@ -396,6 +396,187 @@ static void bench_aot_transform_latency(int32_t* d_a, int32_t* d_b, int32_t* d_o
 }
 
 // --------------------------------------------------------------------------
+// General link-order benchmark
+// --------------------------------------------------------------------------
+enum class link_algo
+{
+  transform,
+  reduce
+};
+
+struct link_spec
+{
+  const char* name;            // e.g. "transform_i32"
+  link_algo algo;
+  const char* kernel_fragment; // e.g. "aot_binary_transform_i32"
+  const char* op_fragment;     // e.g. "op_add_i32"
+  size_t value_size;
+  cccl_type_enum type_enum;
+  // Reduce-specific kernel names (unused for transform)
+  const char* single_tile_kernel;
+  const char* reduction_kernel;
+  const char* single_tile_second_kernel;
+};
+
+static const link_spec all_specs[] = {
+  {"transform_i32", link_algo::transform, "aot_binary_transform_i32", "op_add_i32",
+   sizeof(int32_t), CCCL_INT32, nullptr, nullptr, nullptr},
+  {"transform_i64", link_algo::transform, "aot_binary_transform_i64", "op_add_i64",
+   sizeof(int64_t), CCCL_INT64, nullptr, nullptr, nullptr},
+  {"transform_f32", link_algo::transform, "aot_binary_transform_f32", "op_add_f32",
+   sizeof(float), CCCL_FLOAT32, nullptr, nullptr, nullptr},
+  {"transform_f64", link_algo::transform, "aot_binary_transform_f64", "op_add_f64",
+   sizeof(double), CCCL_FLOAT64, nullptr, nullptr, nullptr},
+  {"reduce_i32", link_algo::reduce, "aot_reduce_i32", "op_sum_i32",
+   sizeof(int32_t), CCCL_INT32,
+   "aot_reduce_i32_single_tile", "aot_reduce_i32_reduction", "aot_reduce_i32_single_tile_second"},
+  {"reduce_i64", link_algo::reduce, "aot_reduce_i64", "op_sum_i64",
+   sizeof(int64_t), CCCL_INT64,
+   "aot_reduce_i64_single_tile", "aot_reduce_i64_reduction", "aot_reduce_i64_single_tile_second"},
+  {"reduce_f32", link_algo::reduce, "aot_reduce_f32", "op_sum_f32",
+   sizeof(float), CCCL_FLOAT32,
+   "aot_reduce_f32_single_tile", "aot_reduce_f32_reduction", "aot_reduce_f32_single_tile_second"},
+  {"reduce_f64", link_algo::reduce, "aot_reduce_f64", "op_sum_f64",
+   sizeof(double), CCCL_FLOAT64,
+   "aot_reduce_f64_single_tile", "aot_reduce_f64_reduction", "aot_reduce_f64_single_tile_second"},
+};
+constexpr size_t num_all_specs = sizeof(all_specs) / sizeof(all_specs[0]);
+
+static const link_spec* find_spec(const char* name)
+{
+  for (size_t i = 0; i < num_all_specs; i++)
+  {
+    if (strcmp(all_specs[i].name, name) == 0)
+    {
+      return &all_specs[i];
+    }
+  }
+  return nullptr;
+}
+
+static double link_once(const link_spec& spec, int cc_major, int cc_minor)
+{
+  const auto& registry    = fatbin_registry::instance();
+  const auto* kernel_frag = registry.lookup(spec.kernel_fragment);
+  const auto* op_frag     = registry.lookup(spec.op_fragment);
+  if (!kernel_frag || !op_frag)
+  {
+    fprintf(stderr, "Missing fatbin: %s or %s\n", spec.kernel_fragment, spec.op_fragment);
+    exit(1);
+  }
+
+  const char* input_list[]   = {
+    reinterpret_cast<const char*>(kernel_frag->data),
+    reinterpret_cast<const char*>(op_frag->data),
+  };
+  const size_t input_sizes[] = {kernel_frag->size, op_frag->size};
+
+  double us;
+  if (spec.algo == link_algo::transform)
+  {
+    const size_t input_value_sizes[] = {spec.value_size, spec.value_size};
+    cccl_device_transform_build_result_t build{};
+    auto t0 = clock_t_::now();
+    CHECK_CU(cccl_device_transform_link_ltoir(
+      &build, input_list, input_sizes, 2,
+      CCCL_LTOIR_INPUT_FATBIN,
+      spec.kernel_fragment,
+      2, input_value_sizes, spec.value_size,
+      cc_major, cc_minor));
+    auto t1 = clock_t_::now();
+    us = elapsed_us(t0, t1);
+    CHECK_CU(cccl_device_transform_cleanup(&build));
+  }
+  else
+  {
+    cccl_type_info accum_type{spec.value_size, spec.value_size, spec.type_enum};
+    cccl_device_reduce_build_result_t build{};
+    auto t0 = clock_t_::now();
+    CHECK_CU(cccl_device_reduce_link_ltoir(
+      &build, input_list, input_sizes, 2,
+      spec.single_tile_kernel,
+      spec.reduction_kernel,
+      spec.single_tile_second_kernel,
+      accum_type, cc_major, cc_minor));
+    auto t1 = clock_t_::now();
+    us = elapsed_us(t0, t1);
+    CHECK_CU(cccl_device_reduce_cleanup(&build));
+  }
+  return us;
+}
+
+static void clear_all_caches()
+{
+  cccl_device_transform_clear_cache();
+  cccl_device_reduce_clear_cache();
+}
+
+// Parse comma-separated spec names, link each in order, print CSV.
+static void bench_link_order(const char* order_str, int cc_major, int cc_minor)
+{
+  std::vector<const link_spec*> order;
+  std::string s(order_str);
+  size_t pos = 0;
+  while (pos < s.size())
+  {
+    size_t comma = s.find(',', pos);
+    if (comma == std::string::npos)
+    {
+      comma = s.size();
+    }
+    std::string token = s.substr(pos, comma - pos);
+    const link_spec* sp = find_spec(token.c_str());
+    if (!sp)
+    {
+      fprintf(stderr, "Unknown spec: %s\nAvailable:", token.c_str());
+      for (size_t i = 0; i < num_all_specs; i++)
+      {
+        fprintf(stderr, " %s", all_specs[i].name);
+      }
+      fprintf(stderr, "\n");
+      exit(1);
+    }
+    order.push_back(sp);
+    pos = comma + 1;
+  }
+
+  clear_all_caches();
+  printf("position,kernel,link_us\n");
+  for (size_t i = 0; i < order.size(); i++)
+  {
+    double us = link_once(*order[i], cc_major, cc_minor);
+    printf("%zu,%s,%.2f\n", i, order[i]->name, us);
+  }
+}
+
+// Measure each kernel when linked first vs last.
+// For "first": clear caches, link target kernel alone.
+// For "last": clear caches, link all OTHER kernels, then link target kernel.
+static void bench_first_vs_last(int cc_major, int cc_minor)
+{
+  printf("kernel,position,link_us\n");
+  for (size_t target = 0; target < num_all_specs; target++)
+  {
+    // --- First (position 0, cold nvJitLink + cold cache) ---
+    clear_all_caches();
+    double first_us = link_once(all_specs[target], cc_major, cc_minor);
+    printf("%s,first,%.2f\n", all_specs[target].name, first_us);
+
+    // --- Last (position N-1, warm nvJitLink + cold cache for this kernel) ---
+    clear_all_caches();
+    for (size_t other = 0; other < num_all_specs; other++)
+    {
+      if (other != target)
+      {
+        link_once(all_specs[other], cc_major, cc_minor);
+      }
+    }
+    double last_us = link_once(all_specs[target], cc_major, cc_minor);
+    printf("%s,last,%.2f\n", all_specs[target].name, last_us);
+  }
+}
+
+// --------------------------------------------------------------------------
 // Stats helpers
 // --------------------------------------------------------------------------
 static double median(std::vector<double>& v)
@@ -428,6 +609,8 @@ int main(int argc, char** argv)
   int warmup = 10;
   int iters  = 100;
   size_t N   = 1 << 20; // 1M elements default
+  bool first_vs_last = false;
+  const char* link_order = nullptr;
 
   for (int i = 1; i < argc; i++)
   {
@@ -442,6 +625,14 @@ int main(int argc, char** argv)
     else if (strcmp(argv[i], "--elements") == 0 && i + 1 < argc)
     {
       N = static_cast<size_t>(atoll(argv[++i]));
+    }
+    else if (strcmp(argv[i], "--first-vs-last") == 0)
+    {
+      first_vs_last = true;
+    }
+    else if (strcmp(argv[i], "--link-order") == 0 && i + 1 < argc)
+    {
+      link_order = argv[++i];
     }
   }
 
@@ -458,6 +649,20 @@ int main(int argc, char** argv)
 
   fprintf(stderr, "Latency harness: N=%zu, warmup=%d, iters=%d, sm_%d%d\n",
           N, warmup, iters, cc_major, cc_minor);
+
+  if (first_vs_last)
+  {
+    bench_first_vs_last(cc_major, cc_minor);
+    CHECK_CU(cuCtxDestroy(ctx));
+    return 0;
+  }
+
+  if (link_order)
+  {
+    bench_link_order(link_order, cc_major, cc_minor);
+    CHECK_CU(cuCtxDestroy(ctx));
+    return 0;
+  }
 
   // Allocate device memory
   int32_t* d_reduce_in;

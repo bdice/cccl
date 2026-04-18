@@ -851,3 +851,10 @@ catch (const std::exception& exc)
 
   return CUDA_ERROR_UNKNOWN;
 }
+
+extern "C" CCCL_C_API void cccl_device_transform_clear_cache(void)
+{
+  auto& cc = transform::cubin_cache::instance();
+  std::lock_guard<std::mutex> lock(cc.mutex);
+  cc.entries.clear();
+}

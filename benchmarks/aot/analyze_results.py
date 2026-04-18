@@ -9,6 +9,7 @@ import argparse
 import csv
 import json
 import os
+import statistics
 import sys
 from pathlib import Path
 
@@ -145,42 +146,145 @@ def plot_latency_bars(latency_data, output_dir):
     if not HAS_MPL:
         return None
 
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4))
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 3.5))
 
-    # Reduce latency
-    reduce_bars = {
-        "CUB median": latency_data.get(("cub_reduce", "launch_median_us"), 0),
-        "AOT median": latency_data.get(("aot_reduce", "launch_median_us"), 0),
-        "AOT cold link": latency_data.get(("aot_reduce", "cold_link_us"), 0),
-        "AOT hot link": latency_data.get(("aot_reduce", "hot_link_us"), 0),
-    }
-    ax1.barh(
-        list(reduce_bars.keys()),
-        list(reduce_bars.values()),
-        color=["#1f77b4", "#ff7f0e", "#d62728", "#2ca02c"],
-    )
-    ax1.set_xlabel("Latency (us)")
-    ax1.set_title("Reduce Latency")
+    for ax, algo in [(ax1, "reduce"), (ax2, "transform")]:
+        bars = {
+            "Cold link": latency_data.get((f"aot_{algo}", "cold_link_us"), 0),
+            "Hot link": latency_data.get((f"aot_{algo}", "hot_link_us"), 0),
+        }
+        labels = list(bars.keys())
+        values = list(bars.values())
+        colors = ["#d62728", "#2ca02c"]
 
-    # Transform latency
-    transform_bars = {
-        "CUB median": latency_data.get(("cub_transform", "launch_median_us"), 0),
-        "AOT median": latency_data.get(("aot_transform", "launch_median_us"), 0),
-        "AOT cold link": latency_data.get(("aot_transform", "cold_link_us"), 0),
-        "AOT hot link": latency_data.get(("aot_transform", "hot_link_us"), 0),
-    }
-    ax2.barh(
-        list(transform_bars.keys()),
-        list(transform_bars.values()),
-        color=["#1f77b4", "#ff7f0e", "#d62728", "#2ca02c"],
-    )
-    ax2.set_xlabel("Latency (us)")
-    ax2.set_title("Transform Latency")
+        b = ax.barh(labels, values, color=colors)
+        for bar, val in zip(b, values):
+            ax.text(
+                bar.get_width() + ax.get_xlim()[1] * 0.01,
+                bar.get_y() + bar.get_height() / 2,
+                f"{val:.1f} us",
+                va="center",
+                fontsize=9,
+            )
 
-    fig.suptitle("Launch & Link Latency (int32, N=1M)", fontsize=14)
+        ax.set_xlabel("Latency (us)")
+        ax.set_title(f"{algo.title()} Link Latency")
+        ax.set_xlim(right=max(values) * 1.25)
+
+    fig.suptitle("AOT Link Latency (int32, N=1M)", fontsize=14)
     fig.tight_layout()
 
     filename = "latency_comparison.png"
+    filepath = os.path.join(output_dir, filename)
+    fig.savefig(filepath, dpi=150)
+    plt.close(fig)
+    return filename
+
+
+def parse_first_vs_second_csv(filepath):
+    """Parse first_vs_second.csv into {(kernel, position): [link_us, ...]}."""
+    data = {}
+    with open(filepath) as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            key = (row["kernel"], row["position"])
+            data.setdefault(key, []).append(float(row["link_us"]))
+    return data
+
+
+def plot_first_vs_second(data, output_dir):
+    """Generate grouped bar chart: first-in-process vs second-in-process link latency."""
+    if not HAS_MPL:
+        return None
+
+    # Determine kernel order: transforms then reduces, each sorted by type
+    all_kernels = sorted(set(k for k, _ in data.keys()))
+    transform_kernels = [k for k in all_kernels if k.startswith("transform_")]
+    reduce_kernels = [k for k in all_kernels if k.startswith("reduce_")]
+    kernels = transform_kernels + reduce_kernels
+
+    # Compute stats, dropping run 1 (index 0) as OS cold-start outlier
+    def trimmed(values):
+        return sorted(values)[1:] if len(values) > 2 else values
+
+    first_medians = []
+    first_mins = []
+    first_maxs = []
+    second_medians = []
+    second_mins = []
+    second_maxs = []
+    labels = []
+
+    for k in kernels:
+        algo, dtype = k.split("_", 1)
+        labels.append(f"{algo}\n{dtype}")
+
+        fvals = trimmed(data.get((k, "first"), [0]))
+        svals = trimmed(data.get((k, "second"), [0]))
+
+        first_medians.append(statistics.median(fvals))
+        first_mins.append(min(fvals))
+        first_maxs.append(max(fvals))
+        second_medians.append(statistics.median(svals))
+        second_mins.append(min(svals))
+        second_maxs.append(max(svals))
+
+    import numpy as np
+
+    y = np.arange(len(kernels))
+    bar_height = 0.35
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+
+    bars1 = ax.barh(
+        y + bar_height / 2,
+        first_medians,
+        bar_height,
+        label="First in process",
+        color="#d62728",
+        alpha=0.85,
+    )
+    bars2 = ax.barh(
+        y - bar_height / 2,
+        second_medians,
+        bar_height,
+        label="Second in process",
+        color="#2ca02c",
+        alpha=0.85,
+    )
+
+    xmax = max(max(first_medians), max(second_medians)) * 1.65
+    for bar, med, lo, hi in zip(bars1, first_medians, first_mins, first_maxs):
+        ax.text(
+            bar.get_width() + xmax * 0.015,
+            bar.get_y() + bar.get_height() / 2,
+            f"median: {med:.0f} (min: {lo:.0f}, max: {hi:.0f})",
+            va="center",
+            fontsize=8,
+        )
+    for bar, med, lo, hi in zip(bars2, second_medians, second_mins, second_maxs):
+        ax.text(
+            bar.get_width() + xmax * 0.015,
+            bar.get_y() + bar.get_height() / 2,
+            f"median: {med:.0f} (min: {lo:.0f}, max: {hi:.0f})",
+            va="center",
+            fontsize=8,
+        )
+
+    ax.set_yticks(y)
+    ax.set_yticklabels(labels)
+    ax.set_xlabel("Link latency (us)")
+    ax.set_xlim(right=xmax)
+    ax.legend(loc="lower right")
+    ax.grid(True, axis="x", alpha=0.3)
+    ax.set_title(
+        "nvJitLink Cold-Link Latency: First vs Second Call in Process\n"
+        "(error bars = range across trials, excluding first trial)",
+        fontsize=11,
+    )
+    fig.tight_layout()
+
+    filename = "first_vs_second.png"
     filepath = os.path.join(output_dir, filename)
     fig.savefig(filepath, dpi=150)
     plt.close(fig)
@@ -247,6 +351,16 @@ def generate_report(results_dir, output_file):
     else:
         lines.append("\n## Latency\n")
         lines.append("*Data not found (latency.csv)*\n")
+
+    # First-vs-second link ordering results
+    fvs_file = results_dir / "first_vs_second.csv"
+    if fvs_file.exists():
+        fvs_data = parse_first_vs_second_csv(fvs_file)
+        plot_file = plot_first_vs_second(fvs_data, str(output_dir))
+
+        lines.append("\n## nvJitLink Init Cost: First vs Second Link in Process\n")
+        if plot_file:
+            lines.append(f"![first vs second]({plot_file})\n")
 
     report = "\n".join(lines)
 

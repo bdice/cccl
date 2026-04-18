@@ -722,3 +722,10 @@ catch (const std::exception& exc)
   fflush(stdout);
   return CUDA_ERROR_UNKNOWN;
 }
+
+extern "C" CCCL_C_API void cccl_device_reduce_clear_cache(void)
+{
+  auto& cc = reduce::cubin_cache::instance();
+  std::lock_guard<std::mutex> lock(cc.mutex);
+  cc.entries.clear();
+}
